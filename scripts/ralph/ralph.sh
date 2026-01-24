@@ -332,11 +332,13 @@ WORKER_TIMEOUT="${WORKER_TIMEOUT:-3600}"  # 1hr default; safety guard against ru
 BRANCH_MODE="${BRANCH_MODE:-new}"
 PLAN_REVIEW="${PLAN_REVIEW:-none}"
 WORK_REVIEW="${WORK_REVIEW:-none}"
-CODEX_SANDBOX="${CODEX_SANDBOX:-auto}"  # Codex sandbox mode; flowctl reads this env var
 REQUIRE_PLAN_REVIEW="${REQUIRE_PLAN_REVIEW:-0}"
 YOLO="${YOLO:-0}"
 EPICS="${EPICS:-}"
-export CODEX_SANDBOX  # Ensure available to Claude worker for flowctl codex commands
+
+# Export CODEX_SANDBOX for flowctl codex commands (default: auto)
+# Windows requires 'auto' or 'danger-full-access' because read-only blocks all shell commands
+export CODEX_SANDBOX="${CODEX_SANDBOX:-auto}"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do

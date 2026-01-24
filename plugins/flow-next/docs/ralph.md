@@ -285,6 +285,20 @@ Note: `-p` mode is headless but still prompts for file/command permissions. `YOL
 |----------|---------|-------------|
 | `RALPH_UI` | `1` | Colored/emoji output (0 = plain) |
 
+### Codex Settings
+
+| Variable | Values | Default | Description |
+|----------|--------|---------|-------------|
+| `CODEX_SANDBOX` | `read-only`, `workspace-write`, `danger-full-access`, `auto` | `auto` | Codex CLI sandbox mode |
+| `FLOW_CODEX_EMBED_MAX_BYTES` | integer bytes | `500000` | Total bytes of file contents embedded in Codex review prompts (diff excluded). Set to `0` for unlimited. |
+
+- `read-only` — Can only read files (Unix default, **blocks all operations on Windows**)
+- `workspace-write` — Can write files in workspace
+- `danger-full-access` — Full file system access
+- `auto` — Resolves to `danger-full-access` on Windows, `read-only` on Unix
+
+**Windows users:** Use `auto` (default) or `danger-full-access`. The `read-only` mode blocks ALL shell commands on Windows, including file reads.
+
 ---
 
 ## Run Artifacts
@@ -385,6 +399,18 @@ codex auth
 ```
 
 Or switch to RepoPrompt: set `PLAN_REVIEW=rp` and `WORK_REVIEW=rp`.
+
+### Codex sandbox "blocked by policy" errors (Windows)
+
+**Symptom:** Codex reviews fail with errors like "blocked by security policy" or "operation not permitted" on Windows.
+
+**Cause:** Codex CLI's `read-only` sandbox mode uses Windows AppContainer which blocks ALL shell commands, including file reads.
+
+**Fix:** Set `CODEX_SANDBOX=auto` or `CODEX_SANDBOX=danger-full-access` in `scripts/ralph/config.env`.
+
+**Exit code 3:** flowctl returns exit code 3 for sandbox configuration issues. Ralph will retry the iteration, but the error will persist until you fix the `CODEX_SANDBOX` config.
+
+**Note:** After plugin update, re-run `/flow-next:ralph-init` to get the latest `config.env` with `CODEX_SANDBOX=auto` default.
 
 ---
 

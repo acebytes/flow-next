@@ -504,12 +504,12 @@ codex auth
 flowctl codex check [--json]
 
 # Implementation review (reviews code changes for a task)
-flowctl codex impl-review <task-id> --base <branch> [--receipt <path>] [--json]
-# Example: flowctl codex impl-review fn-1.3 --base main --receipt /tmp/impl-fn-1.3.json
+flowctl codex impl-review <task-id> --base <branch> [--sandbox <mode>] [--receipt <path>] [--json]
+# Example: flowctl codex impl-review fn-1.3 --base main --sandbox auto --receipt /tmp/impl-fn-1.3.json
 
 # Plan review (reviews epic spec before implementation)
-flowctl codex plan-review <epic-id> --base <branch> [--receipt <path>] [--json]
-# Example: flowctl codex plan-review fn-1 --base main --receipt /tmp/plan-fn-1.json
+flowctl codex plan-review <epic-id> --files <file1,file2,...> [--sandbox <mode>] [--receipt <path>] [--json]
+# Example: flowctl codex plan-review fn-1 --files .flow/specs/fn-1.md,.flow/tasks/fn-1.1.md --sandbox auto --receipt /tmp/plan-fn-1.json
 ```
 
 **How it works:**
@@ -547,6 +547,18 @@ References: src/middleware.py:45 (calls authenticate), tests/test_auth.py:12
 ```
 
 **Session continuity:** Receipt includes `session_id` (thread_id from codex). Subsequent reviews read the existing receipt and resume the conversation, maintaining full context across fix → re-review cycles.
+
+**Embedding budget (`FLOW_CODEX_EMBED_MAX_BYTES`):** Optional limit on the total bytes of file contents embedded into the review prompt (diff excluded). Default `0` (unlimited). Set to a value like `500000` (500KB) to cap prompt size.
+
+**Sandbox mode (`--sandbox`):** Controls Codex CLI's file system access. Available modes:
+- `read-only` (default on Unix) — Can only read files
+- `workspace-write` — Can write files in workspace
+- `danger-full-access` — Full file system access (required for Windows)
+- `auto` — Resolves to `danger-full-access` on Windows, `read-only` on Unix
+
+**Windows users:** Codex CLI's `read-only` sandbox blocks ALL shell commands on Windows (including reads). Use `--sandbox auto` or `--sandbox danger-full-access` for Windows compatibility.
+
+**Note:** After plugin update, re-run `/flow-next:setup` or `/flow-next:ralph-init` to get sandbox fixes.
 
 ### checkpoint
 
@@ -635,7 +647,7 @@ All commands support `--json` (except `cat`). Wrapper format:
 {"success": false, "error": "message"}
 ```
 
-Exit codes: 0=success, 1=error.
+Exit codes: 0=success, 1=general error, 2=tool/parse error, 3=sandbox configuration error.
 
 ## Error Handling
 
