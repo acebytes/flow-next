@@ -1502,8 +1502,8 @@ def find_dependents(task_id: str, same_epic: bool = False) -> list[str]:
         checked.add(checking)
 
         for task_file in tasks_dir.glob("fn-*.json"):
-            if "." not in task_file.stem:
-                continue
+            if not is_task_id(task_file.stem):
+                continue  # Skip non-task files (e.g., fn-1.2-review.json)
             try:
                 task_data = load_json(task_file)
                 tid = task_data.get("id", task_file.stem)
