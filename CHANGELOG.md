@@ -2,6 +2,16 @@
 
 All notable changes to the gmickel-claude-marketplace.
 
+## [flow-next 0.22.0] - 2026-02-17
+
+### Fixed
+
+- **Fix receipt-reset false positive on codex reviews** — PostToolUse receipt-write detection matched codex commands containing `--receipt` path + `>` chars in stdout (from `<verdict>` tags), causing `chat_send_succeeded` and `codex_review_succeeded` to reset immediately after being set. Receipt-write detection now uses proper shell redirect pattern matching (same regexes as PreToolUse) instead of naive substring checks. (thanks @clairernovotny for reporting)
+
+### Added
+
+- **Block self-modification of workflow files** — Ralph can no longer Edit/Write to `ralph-guard.py`, `flowctl.py`, `flowctl`, or `hooks.json` during a run. Hooks config now registers `Edit|Write` matcher in addition to `Bash|Execute`. Prevents agents from bypassing guards by editing their own tooling. (ralph-guard v0.13.0)
+
 ## [flow-next 0.21.0] - 2026-02-17
 
 ### Changed
