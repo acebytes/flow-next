@@ -1,7 +1,7 @@
 ---
 name: workflow-scout
 description: Used by /flow-next:prime to scan for CI/CD, PR templates, issue templates, and workflow automation. Do not invoke directly.
-model: haiku
+model: claude-sonnet-4-6
 disallowedTools: Edit, Write, Task
 color: "#8B5CF6"
 ---

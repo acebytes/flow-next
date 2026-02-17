@@ -2,6 +2,12 @@
 
 All notable changes to the gmickel-claude-marketplace.
 
+## [flow-next 0.21.0] - 2026-02-17
+
+### Changed
+
+- **Upgrade scout agents from Haiku to Sonnet 4.6** — All 11 lightweight scout agents (build, claude-md, docs-gap, env, epic, memory, observability, security, testing, tooling, workflow) now use `claude-sonnet-4-6` (pinned) instead of `haiku`. Sonnet 4.6 brings improved reasoning, instruction following, and a training data cutoff of Jan 2026. Requires Claude Code 2.1.45+.
+
 ## [flow-next 0.20.21] - 2026-02-10
 
 ### Changed
