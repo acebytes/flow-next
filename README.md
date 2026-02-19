@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-Plugin_Marketplace-blueviolet)](https://claude.ai/code)
 
-[![Flow-next](https://img.shields.io/badge/Flow--next-v0.22.1-green)](plugins/flow-next/)
+[![Flow-next](https://img.shields.io/badge/Flow--next-v0.22.2-green)](plugins/flow-next/)
 [![Flow-next Docs](https://img.shields.io/badge/Docs-📖-informational)](plugins/flow-next/README.md)
 
 [![Author](https://img.shields.io/badge/Author-Gordon_Mickel-orange)](https://mickel.tech)
@@ -35,6 +35,14 @@
 > droid plugin marketplace add https://github.com/gmickel/gmickel-claude-marketplace
 > ```
 > Then `/plugins` → Marketplace → install flow-next. Commands don't autocomplete yet but work when typed (e.g. `/flow-next:plan`). Skills load automatically.
+
+> [!TIP]
+> **🖥️ [OpenAI Codex](https://developers.openai.com/codex/cli/) user?** Full multi-agent support (20 roles, parallel scouts, 3-tier model mapping):
+> ```bash
+> git clone https://github.com/gmickel/gmickel-claude-marketplace.git
+> cd gmickel-claude-marketplace && ./scripts/install-codex.sh flow-next
+> ```
+> Requires Codex 0.102.0+. Commands use `/prompts:` prefix (e.g. `/prompts:plan`). See [Codex install guide](plugins/flow-next/README.md#openai-codex).
 
 ---
 
