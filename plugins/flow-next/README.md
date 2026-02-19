@@ -793,11 +793,27 @@ Reviews block progress until `<verdict>SHIP</verdict>`. Fix → re-review cycles
 - Visual diff review UI + persistent chat threads
 
 **Setup:**
-```bash
-# Install rp-cli (macOS only, requires RP 1.5.68+ for auto-open)
-brew install --cask repoprompt
-# Window auto-opens if needed with --create flag (or open manually for faster context)
-```
+
+1. Install RepoPrompt:
+   ```bash
+   brew install --cask repoprompt
+   ```
+
+2. **Enable MCP Server** (required for rp-cli):
+   - Settings → MCP Server → Enable
+   - Click "Install CLI to PATH" (creates `/usr/local/bin/rp-cli`)
+   - Verify: `rp-cli --version`
+
+3. **Configure models** — RepoPrompt uses two models that must be set in the UI (not controllable via CLI):
+
+   | Setting | Recommended | Purpose |
+   |---------|-------------|---------|
+   | **Context Builder model** | GPT-5.3 Codex Medium (via Codex CLI or OpenAI API) | Builds file selection for reviews. Needs large context window. |
+   | **Chat model** | GPT-5.2 High (via Codex CLI or OpenAI API) | Runs the actual review. Needs strong reasoning. |
+
+   Set these in Settings → Models. Any OpenAI API-compatible model works (Codex CLI, OpenAI API key, or other providers). These models are what make cross-model review valuable — a different model catches blind spots that self-review misses.
+
+   > **Note:** When `--create` auto-opens a new workspace, it inherits your default model settings. Configure models before first use.
 
 **Usage:**
 ```bash
