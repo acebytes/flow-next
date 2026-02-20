@@ -44,6 +44,80 @@ agent-browser trace stop trace.zip  # Save trace file
 
 Open traces in Playwright Trace Viewer: `npx playwright show-trace trace.zip`
 
+## Video Recording
+
+Capture browser automation as video for debugging or documentation:
+
+```bash
+# Start recording
+agent-browser record start ./demo.webm
+
+# Perform actions
+agent-browser open https://example.com
+agent-browser snapshot -i
+agent-browser click @e1
+
+# Stop and save
+agent-browser record stop
+
+# Restart with new file (stops current + starts new)
+agent-browser record restart ./take2.webm
+```
+
+### Recording Tips
+
+- Add `agent-browser wait 500` pauses for human-viewable recordings
+- Use descriptive filenames: `login-flow-2024-01-15.webm`
+- Combine with screenshots for key frames
+- Always stop recording on error:
+  ```bash
+  cleanup() { agent-browser record stop 2>/dev/null || true; }
+  trap cleanup EXIT
+  ```
+
+**Output format:** WebM (VP8/VP9 codec), compatible with all modern browsers.
+
+## Chrome DevTools Profiling
+
+Capture performance profiles for analysis:
+
+```bash
+# Start profiling
+agent-browser profiler start
+
+# Perform actions to profile
+agent-browser open https://app.example.com
+agent-browser wait --load networkidle
+
+# Stop and save
+agent-browser profiler stop ./trace.json
+```
+
+### Custom trace categories
+
+```bash
+agent-browser profiler start --categories "devtools.timeline,v8.execute,blink.user_timing"
+```
+
+Default categories: `devtools.timeline`, `v8.execute`, `blink`, `blink.user_timing`, `latencyInfo`, `renderer.scheduler`, `toplevel`.
+
+### Viewing profiles
+
+- **Chrome DevTools:** Performance panel → Load profile
+- **Perfetto UI:** https://ui.perfetto.dev/ — drag and drop JSON
+- **Trace Viewer:** `chrome://tracing`
+
+**Limitations:** Chromium-only. Trace data capped at 5M events. 30s timeout on stop.
+
+## Debug Output
+
+Add `--debug` for verbose output:
+
+```bash
+agent-browser --debug open example.com
+agent-browser --debug click @e1
+```
+
 ## State Checks
 
 Verify element state before interacting:
@@ -81,12 +155,3 @@ agent-browser is visible @e1 --json
 - Save state after successful login: `state save auth.json`
 - Check cookies: `cookies`
 - Verify URL pattern: `get url`
-
-## Debug Output
-
-Add `--debug` for verbose output:
-
-```bash
-agent-browser --debug open example.com
-agent-browser --debug click @e1
-```

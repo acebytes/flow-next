@@ -2,6 +2,14 @@
 
 All notable changes to the gmickel-claude-marketplace.
 
+## [flow-next 0.23.0] - 2026-02-20
+
+### Added
+
+- **Browser skill: comprehensive update from upstream agent-browser** — synced with latest `vercel-labs/agent-browser` skill. New features: version check on use, command chaining guidance, `snapshot -i -C` (cursor-interactive), `click --new-tab`, diff commands (snapshot/screenshot/url comparison), annotated screenshots (`--annotate` vision mode), safe JS eval (`--stdin`/`-b`), config file support, session persistence with encryption (`--session-name`), `--auto-connect` for existing Chrome, `--allow-file-access` for local files, iOS Simulator (`-p ios`), timeouts section, `get box`/`get styles`, `drag`/`upload`, video recording, Chrome DevTools profiling.
+- **Browser skill: new reference files** — `commands.md` (full command reference), `snapshot-refs.md` (ref lifecycle/notation), `session-management.md` (auto-persistence/encryption/concurrency), `proxy.md` (proxy config/geo-testing/rotating proxies).
+- **Browser skill: updated references** — `auth.md` (OAuth/SSO, 2FA, token refresh, security best practices), `debugging.md` (video recording, profiling), `advanced.md` (auto-connect, extensions, env vars, eval stdin/base64).
+
 ## [flow-next 0.22.3] - 2026-02-19
 
 ### Fixed

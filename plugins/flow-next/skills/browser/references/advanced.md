@@ -117,6 +117,19 @@ agent-browser set offline off
 ```bash
 agent-browser set media dark
 agent-browser set media light
+agent-browser set media light reduced-motion  # Light + reduced motion
+```
+
+### Extra HTTP Headers
+
+```bash
+agent-browser set headers '{"X-Key":"value"}'
+```
+
+### HTTP Basic Auth
+
+```bash
+agent-browser set credentials user pass
 ```
 
 ## CDP Mode
@@ -124,32 +137,62 @@ agent-browser set media light
 Connect to existing browser via Chrome DevTools Protocol:
 
 ```bash
-# Connect to Electron app or Chrome with remote debugging
+# Auto-discover running Chrome with remote debugging
+agent-browser --auto-connect open https://example.com
+agent-browser --auto-connect snapshot
+
+# Connect to Electron app or Chrome with explicit port
 # Start Chrome: google-chrome --remote-debugging-port=9222
 agent-browser --cdp 9222 snapshot
 agent-browser --cdp 9222 click @e1
+agent-browser connect 9222  # Alternative: connect command
 ```
 
-Use cases:
-- Control Electron apps
-- Connect to existing Chrome sessions
-- WebView2 applications
+Use cases: control Electron apps, connect to existing Chrome sessions, WebView2 apps.
 
 ## JavaScript Evaluation
 
 ```bash
-agent-browser eval "document.title"
-agent-browser eval "window.scrollTo(0, 1000)"
-agent-browser eval "localStorage.getItem('token')"
+# Simple expressions
+agent-browser eval 'document.title'
+agent-browser eval 'window.scrollTo(0, 1000)'
+agent-browser eval 'localStorage.getItem("token")'
+
+# Complex JS: use --stdin (RECOMMENDED for anything with nested quotes)
+agent-browser eval --stdin <<'EVALEOF'
+JSON.stringify(
+  Array.from(document.querySelectorAll("img"))
+    .filter(i => !i.alt)
+    .map(i => ({ src: i.src.split("/").pop(), width: i.width }))
+)
+EVALEOF
+
+# Base64 encoding (bypasses all shell escaping)
+agent-browser eval -b "$(echo -n 'Array.from(document.querySelectorAll("a")).map(a => a.href)' | base64)"
 ```
 
-## Bounding Box
+## Bounding Box & Styles
 
-Get element position and size:
+Get element position, size, and computed styles:
 
 ```bash
 agent-browser get box @e1
 # {"x":100,"y":200,"width":150,"height":40}
+
+agent-browser get styles @e1
+# font, color, background, etc.
+```
+
+## Browser Extensions
+
+Load browser extensions:
+
+```bash
+agent-browser --extension /path/to/extension open example.com
+# Multiple extensions
+agent-browser --extension /ext1 --extension /ext2 open example.com
+# Via env var (comma-separated)
+AGENT_BROWSER_EXTENSIONS="/ext1,/ext2" agent-browser open example.com
 ```
 
 ## Custom Browser Executable
@@ -163,7 +206,25 @@ agent-browser --executable-path /usr/bin/google-chrome open example.com
 AGENT_BROWSER_EXECUTABLE_PATH=/path/to/chromium agent-browser open example.com
 ```
 
-Useful for:
-- Serverless (use `@sparticuz/chromium`)
-- System browser instead of bundled
-- Custom Chromium builds
+Useful for: serverless (`@sparticuz/chromium`), system browser, custom Chromium builds.
+
+## Ignore HTTPS Errors
+
+For self-signed certs or SSL inspection proxies:
+
+```bash
+agent-browser --ignore-https-errors open https://self-signed.example.com
+```
+
+## Environment Variables
+
+```bash
+AGENT_BROWSER_SESSION="mysession"            # Default session name
+AGENT_BROWSER_EXECUTABLE_PATH="/path/chrome" # Custom browser path
+AGENT_BROWSER_EXTENSIONS="/ext1,/ext2"       # Comma-separated extension paths
+AGENT_BROWSER_PROVIDER="browserbase"         # Cloud browser provider
+AGENT_BROWSER_STREAM_PORT="9223"             # WebSocket streaming port
+AGENT_BROWSER_HOME="/path/to/agent-browser"  # Custom install location
+AGENT_BROWSER_CONFIG="/path/to/config.json"  # Custom config file
+AGENT_BROWSER_ENCRYPTION_KEY="hex-key"       # Encrypt session state at rest
+```
