@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../../LICENSE)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-Plugin-blueviolet)](https://claude.ai/code)
 
-[![Version](https://img.shields.io/badge/Version-0.22.3-green)](../../CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-0.24.0-green)](../../CHANGELOG.md)
 
 [![Status](https://img.shields.io/badge/Status-Active_Development-brightgreen)](../../CHANGELOG.md)
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/nHEmyJB5tg)
@@ -164,6 +164,9 @@ flowctl ready --epic fn-1    # What's ready to work on
 ### 3. Use
 
 ```bash
+# Spec: "create a spec for X" — writes epic with structured requirements
+# Then plan or interview to refine
+
 # Plan: research, create epic with tasks
 /flow-next:plan Add a contact form with validation
 
@@ -181,6 +184,20 @@ That's it. Flow-Next handles research, task ordering, reviews, and audit trails.
 Flow-next is flexible. There's no single "correct" order — the right sequence depends on how well-defined your spec already is.
 
 **The key question: How fleshed out is your idea?**
+
+#### Spec-driven (recommended for new features)
+
+```
+Create spec → Interview or Plan → Work
+```
+
+1. **Create spec** — ask Claude to "create a spec for X". This creates an epic with a structured spec (goal, architecture, API contracts, edge cases, acceptance criteria, boundaries, decision context) — no tasks yet
+2. **Refine or plan**:
+   - `/flow-next:interview fn-1` — deep Q&A to pressure-test the spec, surface gaps
+   - `/flow-next:plan fn-1` — research best practices + break into tasks
+3. **Work** — `/flow-next:work fn-1` executes with re-anchoring and reviews
+
+Best for: features where you want to nail down the WHAT/WHY before committing to HOW. The spec captures everything an implementer needs.
 
 #### Vague idea or rough concept
 
@@ -230,13 +247,15 @@ Best for: bug fixes, small features, well-scoped changes that don't need task sp
 
 | Starting point | Recommended sequence |
 |----------------|---------------------|
+| New feature, want solid spec first | Spec → Interview/Plan → Work |
 | Vague idea, rough notes | Interview → Plan → Work |
 | Detailed spec/PRD | Plan → Interview → Work |
 | Well-understood, needs task splitting | Plan → Work |
 | Small single-task, spec complete | Work directly (creates 1 epic + 1 task) |
 
-**Interview vs Plan boundary:**
-- **Interview** creates an epic with refined requirements (problem, decisions, edge cases). It does NOT create tasks or research the codebase.
+**Spec vs Interview vs Plan:**
+- **Spec** (just ask "create a spec") creates an epic with structured requirements (goal, architecture, API contracts, edge cases, acceptance criteria, boundaries). No tasks, no codebase research.
+- **Interview** refines an epic via deep Q&A (40+ questions). Writes back to the epic spec only — no tasks.
 - **Plan** researches best practices, analyzes existing patterns, and creates sized tasks with dependencies.
 
 You can always run interview again after planning to catch anything missed. Interview writes back to the epic spec only — it won't modify existing tasks.

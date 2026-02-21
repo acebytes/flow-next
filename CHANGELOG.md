@@ -2,6 +2,15 @@
 
 All notable changes to the gmickel-claude-marketplace.
 
+## [flow-next 0.24.0] - 2026-02-21
+
+### Added
+
+- **Spec-driven workflow** — "create a spec for X" now has guidance in the CLAUDE.md/AGENTS.md snippet installed by `/flow-next:setup`. Creates an epic with structured spec template (Goal & Context, Architecture & Data Models, API Contracts, Edge Cases & Constraints, Acceptance Criteria, Boundaries, Decision Context). Then choose `/flow-next:plan` (task breakdown) or `/flow-next:interview` (refine spec).
+- **README: spec-driven entry point** — new "Spec-driven" workflow section in "When to Use What", updated summary table, clarified Spec vs Interview vs Plan boundaries.
+
+> Re-run `/flow-next:setup` to update your project's CLAUDE.md/AGENTS.md with the new spec guidance.
+
 ## [flow-next 0.23.0] - 2026-02-20
 
 ### Added
