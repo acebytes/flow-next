@@ -5414,10 +5414,9 @@ def cmd_rp_setup_review(args: argparse.Namespace) -> None:
 
     win_id: Optional[int] = None
 
-    # Single window with no root paths - use it (unless --create, which needs a folder)
+    # Single window with no root paths - use it
     if len(windows) == 1 and not extract_root_paths(windows[0]):
-        if not getattr(args, "create", False):
-            win_id = extract_window_id(windows[0])
+        win_id = extract_window_id(windows[0])
 
     # Otherwise match by root
     if win_id is None:
