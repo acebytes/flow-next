@@ -5710,8 +5710,10 @@ def cmd_codex_impl_review(args: argparse.Namespace) -> None:
     changed_files = get_changed_files(base_branch)
     embedded_content, embed_stats = get_embedded_file_contents(changed_files)
 
-    # Build prompt
-    files_embedded = True
+    # Only forbid disk reads when ALL files were fully embedded. If the budget
+    # was exhausted or files were truncated, allow Codex to read the remainder
+    # from disk so it doesn't review with incomplete context.
+    files_embedded = not embed_stats.get("budget_skipped") and not embed_stats.get("truncated")
     if standalone:
         prompt = build_standalone_review_prompt(base_branch, focus, diff_summary, files_embedded)
         # Append embedded files and diff content to standalone prompt
@@ -5928,8 +5930,8 @@ def cmd_codex_plan_review(args: argparse.Namespace) -> None:
     base_branch = args.base if hasattr(args, "base") and args.base else "main"
     context_hints = gather_context_hints(base_branch)
 
-    # Build prompt
-    files_embedded = True
+    # Only forbid disk reads when ALL files were fully embedded.
+    files_embedded = not embed_stats.get("budget_skipped") and not embed_stats.get("truncated")
     prompt = build_review_prompt(
         "plan", epic_spec, context_hints, task_specs=task_specs, embedded_files=embedded_content,
         files_embedded=files_embedded
@@ -6285,10 +6287,10 @@ def cmd_codex_completion_review(args: argparse.Namespace) -> None:
     # Always embed changed file contents. See cmd_codex_impl_review comment
     # for rationale.
     changed_files = get_changed_files(base_branch)
-    embedded_content, _ = get_embedded_file_contents(changed_files)
+    embedded_content, embed_stats = get_embedded_file_contents(changed_files)
 
-    # Build prompt
-    files_embedded = True
+    # Only forbid disk reads when ALL files were fully embedded.
+    files_embedded = not embed_stats.get("budget_skipped") and not embed_stats.get("truncated")
     prompt = build_completion_review_prompt(
         epic_spec,
         task_specs,
