@@ -2,6 +2,12 @@
 
 All notable changes to the gmickel-claude-marketplace.
 
+## [flow-next 0.25.0] - 2026-03-01
+
+### Fixed
+
+- **Codex reviews: embed files on all platforms** — removed `os.name == "nt"` gate that restricted file embedding to Windows only. On Unix/macOS, Codex wasted its entire turn budget reading files via `sed`/`rg` before producing a verdict (observed 114 shell commands, 3.68M tokens, no verdict on complex epics). Now always embeds changed files with budget-aware fallback: disk reads allowed when embed budget is exceeded. Default `FLOW_CODEX_EMBED_MAX_BYTES` raised from 100KB to 500KB. (Thanks @acebytes — [#93](https://github.com/gmickel/gmickel-claude-marketplace/pull/93))
+
 ## [flow-next 0.24.0] - 2026-02-21
 
 ### Added
