@@ -22,9 +22,9 @@
 #   Agent entries are merged into ~/.codex/config.toml with descriptions.
 #
 #   Model mapping (3-tier, Claude → Codex):
-#     opus              → gpt-5.4 + reasoning:medium
+#     opus              → gpt-5.4 + reasoning:high
 #       (quality-auditor, flow-gap-analyst, context-scout)
-#     sonnet (smart)    → gpt-5.4 + reasoning:medium
+#     sonnet (smart)    → gpt-5.4 + reasoning:high
 #       (epic-scout, agents-md-scout, docs-gap-scout — need deeper analysis)
 #     sonnet (fast)     → gpt-5.3-codex-spark (no reasoning)
 #       (build, env, testing, tooling, observability, security, workflow, memory scouts)
@@ -35,7 +35,7 @@
 #   Override defaults via env vars:
 #     CODEX_MODEL_INTELLIGENT=gpt-5.4
 #     CODEX_MODEL_FAST=gpt-5.3-codex-spark
-#     CODEX_REASONING_EFFORT=medium
+#     CODEX_REASONING_EFFORT=high
 #     CODEX_AGENT_SANDBOX=workspace-write
 #     CODEX_MAX_THREADS=12
 #
@@ -63,7 +63,7 @@ NC='\033[0m'
 # Codex model defaults (override via env vars)
 CODEX_MODEL_INTELLIGENT="${CODEX_MODEL_INTELLIGENT:-gpt-5.4}"
 CODEX_MODEL_FAST="${CODEX_MODEL_FAST:-gpt-5.3-codex-spark}"
-CODEX_REASONING_EFFORT="${CODEX_REASONING_EFFORT:-medium}"
+CODEX_REASONING_EFFORT="${CODEX_REASONING_EFFORT:-high}"
 CODEX_AGENT_SANDBOX="${CODEX_AGENT_SANDBOX:-workspace-write}"
 CODEX_MAX_THREADS="${CODEX_MAX_THREADS:-12}"
 
