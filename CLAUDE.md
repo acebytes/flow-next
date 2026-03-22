@@ -134,7 +134,7 @@ RP gotchas (must follow):
 
 Debug envs (optional, Ralph only):
 ```bash
-FLOW_RALPH_CLAUDE_MODEL=claude-opus-4-5-20251101
+FLOW_RALPH_CLAUDE_MODEL=claude-opus-4-6
 FLOW_RALPH_CLAUDE_DEBUG=hooks
 FLOW_RALPH_CLAUDE_VERBOSE=1
 FLOW_RALPH_CLAUDE_PERMISSION_MODE=bypassPermissions
