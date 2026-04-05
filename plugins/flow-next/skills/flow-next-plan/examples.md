@@ -161,6 +161,14 @@ Create claude backend following WorkerBackend interface.
 - Use `Bun.spawn` for process management
 - Prompt via `-p` flag (not stdin) per claude CLI
 
+## Investigation targets
+**Required** (read before coding):
+- `src/lib/backends/codex.ts:15-40` — codex backend to mirror
+- `src/lib/backend.ts` — registration entry point
+
+**Optional** (reference as needed):
+- `src/lib/backends/codex.test.ts` — existing test patterns
+
 ## Key context
 - Must be detached process (background worker pattern)
 - Log to `logFile` parameter for verdict parsing
