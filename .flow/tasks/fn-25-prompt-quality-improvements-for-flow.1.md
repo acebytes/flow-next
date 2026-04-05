@@ -92,9 +92,8 @@ Add a brief "Good: Traceability Table" example showing a 3-4 row table with one 
 - [ ] No changes to flowctl commands or .flow/ schema
 - [ ] Existing plan step flow (Step 0-8) unchanged — new sections are additions to output templates only
 ## Done summary
-TBD
-
+Added investigation targets (Required/Optional tiers), requirement coverage traceability table, and early proof point sections to plan skill templates and examples.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 77e9ff4
+- Tests: manual: verified step flow Steps 0-8 unchanged, no schema/hook changes
 - PRs:

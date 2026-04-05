@@ -66,9 +66,8 @@ Add confidence rules to the existing rules section.
 - [ ] No changes to scout tool access or search behavior
 - [ ] Backward compatible — tags are additive to existing output format
 ## Done summary
-TBD
-
+Added [VERIFIED]/[INFERRED] confidence qualifiers to repo-scout and context-scout output formats and rules sections. Builder-auto-selected files are INFERRED unless confirmed via read/structure.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 98069c75a1eb0c7251913b7475b19e88db3ba896
+- Tests: manual review of output format
 - PRs:

@@ -2,6 +2,18 @@
 
 All notable changes to the flow-next.
 
+## [flow-next 0.27.1] - 2026-04-05
+
+### Added
+- **Investigation targets** in task specs — plan writes file paths workers must read before coding
+- **Requirement coverage** traceability table in epic specs — tracks spec-to-task mapping
+- **Early proof point** in epic specs — identifies which task validates the core approach
+- **Bidirectional epic-review** — checks code→spec direction (scope creep detection)
+- **Pre-implementation search** — worker greps for similar functionality before coding
+- **Typed escalation** — structured block messages (SPEC_UNCLEAR, DEPENDENCY_BLOCKED, etc.)
+- **Confidence qualifiers** — scouts tag findings as [VERIFIED] or [INFERRED]
+- **Test budget awareness** — quality-auditor flags disproportionate test generation (advisory)
+
 ## [flow-next 0.27.0] - 2026-04-05
 
 ### Added

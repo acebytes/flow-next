@@ -51,9 +51,8 @@ Updated traceability:
 - [ ] Gracefully skips if no traceability table exists (backward compatible)
 - [ ] No changes to plan-sync's tool access or edit scope rules
 ## Done summary
-TBD
-
+Added traceability table maintenance to plan-sync agent. Phase 5 checks epic spec for `## Requirement coverage` table and updates affected rows on drift; Phase 6 includes traceability changes in return summary. Backward compatible — skips if no table exists.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 3191d38
+- Tests: manual: verified plan-sync.md structure, backward compat (skip if no table)
 - PRs:

@@ -83,9 +83,8 @@ Verify sync is clean — no errors, all agents regenerated.
 - [ ] `plugins/flow-next/scripts/smoke_test.sh` passes
 - [ ] No changes to flowctl, .flow/ JSON, or hooks (doc task only)
 ## Done summary
-TBD
-
+Updated flow-next README Features section (5 new subsections), root README Why It Works table (+1 row), CHANGELOG with [flow-next 0.27.1] entry, version bump via bump.sh, codex sync via sync-codex.sh. Smoke test 52/52 green.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 3191d387b60fe5f94b6fd9463932bf6635317090
+- Tests: plugins/flow-next/scripts/smoke_test.sh (52/52 passed)
 - PRs:

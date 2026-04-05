@@ -56,9 +56,8 @@ And update the "What NOT to Check" list to add:
 - [ ] Both RP and Codex backend prompts updated (or noted if Codex uses embedded prompt)
 - [ ] No changes to verdict parsing logic (still SHIP/NEEDS_WORK)
 ## Done summary
-TBD
-
+Added Phase 3 (Reverse Coverage) to epic-review prompt — maps changed files back to spec requirements, flags untraced changes as UNDOCUMENTED_ADDITION/LEGITIMATE_SUPPORT/UNRELATED_CHANGE. Advisory only. Codex backend prompt in flowctl.py not updated per epic constraint (zero CLI changes).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 3191d387b60fe5f94b6fd9463932bf6635317090
+- Tests: manual: verified diff scoped to workflow.md only
 - PRs:

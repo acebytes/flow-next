@@ -89,9 +89,8 @@ Update the worker's blocking behavior. Currently worker.md has no guidance on ho
 - [ ] Phase numbering consistent (1 → 1.5 → 2 → 3 → 4 → 5 → 6)
 - [ ] Ralph mode unaffected (worker still spawned same way, same env vars)
 ## Done summary
-TBD
-
+Added Phase 1.5 (pre-implementation investigation with required/optional file reads + similar-func search with reuse>extend>new decision tree) and typed escalation (6 categories) to worker.md Rules section.
 ## Evidence
-- Commits:
+- Commits: caa2108aec7d50010957c0251ffaa165a5609746
 - Tests:
 - PRs:
