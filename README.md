@@ -68,6 +68,8 @@ droid plugin marketplace add \
 </tr>
 </table>
 
+**Update Codex:** `cd flow-next && git pull`, then `/plugins` → uninstall → install.
+
 📖 **[Full docs](plugins/flow-next/README.md)** · **[Codex install guide](plugins/flow-next/README.md#openai-codex)** · **[OpenCode port](https://github.com/gmickel/flow-next-opencode)**
 
 ---

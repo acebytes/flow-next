@@ -153,6 +153,18 @@ codex  # → /plugins → install Flow-Next
 
 Then run `$flow-next-setup` in your project.
 
+#### OpenAI Codex (Update)
+
+Codex caches plugins on install. To update to a new version:
+
+```bash
+cd flow-next && git pull   # get latest
+codex                       # open Codex in the repo
+# /plugins → uninstall Flow-Next → install Flow-Next
+```
+
+Reinstalling from within the repo directory picks up the local version. Verify with `$flow-next-setup` in your project — it shows the installed version.
+
 #### OpenAI Codex (Global Install)
 
 ```bash
