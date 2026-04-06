@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-04-06T11:23:21.259697Z",
+  "depends_on": [
+    "fn-26-designmd-aware-orchestration.1"
+  ],
+  "epic": "fn-26-designmd-aware-orchestration",
+  "id": "fn-26-designmd-aware-orchestration.2",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-26-designmd-aware-orchestration.2.md",
+  "status": "todo",
+  "title": "Worker: read DESIGN.md in Phase 1.5 when design context present",
+  "updated_at": "2026-04-06T11:24:44.438294Z"
+}

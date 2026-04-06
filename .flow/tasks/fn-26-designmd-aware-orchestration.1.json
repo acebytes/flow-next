@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-04-06T11:23:21.161859Z",
+  "depends_on": [],
+  "epic": "fn-26-designmd-aware-orchestration",
+  "id": "fn-26-designmd-aware-orchestration.1",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-26-designmd-aware-orchestration.1.md",
+  "status": "todo",
+  "title": "Scout detection + plan skill: DESIGN.md \u2192 design context in task specs",
+  "updated_at": "2026-04-06T11:24:44.324052Z"
+}

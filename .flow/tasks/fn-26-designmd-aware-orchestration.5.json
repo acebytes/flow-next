@@ -1,0 +1,18 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-04-06T11:23:21.561129Z",
+  "depends_on": [
+    "fn-26-designmd-aware-orchestration.2",
+    "fn-26-designmd-aware-orchestration.3",
+    "fn-26-designmd-aware-orchestration.4"
+  ],
+  "epic": "fn-26-designmd-aware-orchestration",
+  "id": "fn-26-designmd-aware-orchestration.5",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-26-designmd-aware-orchestration.5.md",
+  "status": "todo",
+  "title": "Docs, CHANGELOG, version bump, codex sync",
+  "updated_at": "2026-04-06T11:24:44.783116Z"
+}
