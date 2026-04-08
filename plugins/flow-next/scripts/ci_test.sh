@@ -365,8 +365,9 @@ def cleanup_state(repo_root: str) -> None:
         state_file.unlink()
 
 
-def run_setup(fake_run, repo_root: str, summary: str):
+def run_setup(fake_run, repo_root: str, summary: str, fake_try_run=None):
     flowctl.run_rp_cli = fake_run
+    flowctl.try_run_rp_cli = fake_try_run or (lambda args, timeout=None: None)
     cleanup_state(repo_root)
     output = io.StringIO()
     with redirect_stdout(output):
@@ -383,8 +384,36 @@ def run_setup(fake_run, repo_root: str, summary: str):
     return output.getvalue().strip()
 
 
-repo_root = "/tmp/test-project"
-other_repo_root = "/tmp/other-project"
+repo_root = "/workspace/test-project"
+other_repo_root = "/workspace/other-project"
+commands = []
+
+
+def fake_bind_context(args, timeout=None):
+    if args == [
+        "--raw-json",
+        "-e",
+        'call bind_context {"op": "bind", "working_dirs": ["/workspace/test-project"]}',
+    ]:
+        return make_result(json.dumps({"window_id": 55, "match_method": "working_dirs"}))
+    return None
+
+
+def fake_bind_context_builder(args, timeout=None):
+    commands.append(args)
+    if args == ["--raw-json", "-e", "windows"]:
+        return make_result(json.dumps([]))
+    if args == ["-w", "55", "-e", 'builder "Bind me"']:
+        return make_result("Tab: tab-55\n")
+    raise AssertionError(f"Unexpected rp-cli args: {args}")
+
+
+result = run_setup(fake_bind_context_builder, repo_root, "Bind me", fake_try_run=fake_bind_context)
+if result != "W=55 T=tab-55":
+    errors.append(f"setup-review should prefer bind_context when available, got {result!r}")
+if any("manage_workspaces" in arg or arg == "windows" for cmd in commands for arg in cmd):
+    errors.append("setup-review should not fall back to manual workspace/window discovery when bind_context succeeds")
+
 commands = []
 
 

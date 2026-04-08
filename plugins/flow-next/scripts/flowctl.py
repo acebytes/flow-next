@@ -417,6 +417,26 @@ def run_rp_cli(
         error_exit(f"rp-cli failed: {msg}", use_json=False, code=2)
 
 
+def try_run_rp_cli(
+    args: list[str], timeout: Optional[int] = None
+) -> Optional[subprocess.CompletedProcess]:
+    """Run rp-cli and return None on failure.
+
+    Used for optional capability probing where newer RepoPrompt features may not
+    exist yet and flowctl should fall back gracefully.
+    """
+    if timeout is None:
+        timeout = int(os.environ.get("FLOW_RP_TIMEOUT", "1200"))
+    rp = require_rp_cli()
+    cmd = [rp] + args
+    try:
+        return subprocess.run(
+            cmd, capture_output=True, text=True, check=True, timeout=timeout
+        )
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        return None
+
+
 def normalize_repo_root(path: str) -> list[str]:
     """Normalize repo root for window matching."""
     root = os.path.realpath(path)
@@ -642,6 +662,23 @@ def extract_builder_tab_from_payload(data: Any) -> Optional[str]:
                 return tab
 
     return None
+
+
+def bind_context_window(repo_root: str) -> Optional[int]:
+    """Prefer RepoPrompt's bind_context repo-path matching when available."""
+    payload = {"op": "bind", "working_dirs": normalize_repo_root(repo_root)}
+    result = try_run_rp_cli(
+        ["--raw-json", "-e", f"call bind_context {json.dumps(payload)}"]
+    )
+    if result is None:
+        return None
+
+    try:
+        data = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+
+    return extract_response_window_id(data)
 
 
 def parse_builder_tab(output: str) -> str:
@@ -5366,6 +5403,15 @@ def cmd_rp_windows(args: argparse.Namespace) -> None:
 def cmd_rp_pick_window(args: argparse.Namespace) -> None:
     repo_root = args.repo_root
     roots = normalize_repo_root(repo_root)
+
+    win_id = bind_context_window(repo_root)
+    if win_id is not None:
+        if args.json:
+            print(json.dumps({"window": win_id}))
+        else:
+            print(win_id)
+        return
+
     result = run_rp_cli(["--raw-json", "-e", "windows"])
     windows = parse_windows(result.stdout or "")
     if len(windows) == 1 and not extract_root_paths(windows[0]):
@@ -5609,13 +5655,14 @@ def cmd_rp_setup_review(args: argparse.Namespace) -> None:
 
     # Step 1: pick-window
     roots = normalize_repo_root(repo_root)
-    result = run_rp_cli(["--raw-json", "-e", "windows"])
-    windows = parse_windows(result.stdout or "")
-
-    win_id: Optional[int] = None
+    win_id = bind_context_window(repo_root)
+    windows: list[dict[str, Any]] = []
+    if win_id is None:
+        result = run_rp_cli(["--raw-json", "-e", "windows"])
+        windows = parse_windows(result.stdout or "")
 
     # Single window with no root paths - use it
-    if len(windows) == 1 and not extract_root_paths(windows[0]):
+    if win_id is None and len(windows) == 1 and not extract_root_paths(windows[0]):
         win_id = extract_window_id(windows[0])
 
     # Otherwise match by root.
