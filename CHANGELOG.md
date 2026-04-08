@@ -2,6 +2,19 @@
 
 All notable changes to the flow-next.
 
+## [flow-next 0.29.1] - 2026-04-08
+
+### Fixed
+- **RepoPrompt workspace leak in setup-review** — Ralph sessions with `WORK_REVIEW=rp` could accumulate dozens of duplicate RepoPrompt workspaces/windows for the same repo when window matching fell through to `workspace create --new-window` on every retry. Now falls back through three layers: `bind_context` (RP's native repo-path matching, newest API) → workspace inventory lookup by repo path → last-resort creation. Hidden workspaces are reopened via `manage_workspaces switch` instead of duplicated. Thanks @clairernovotny — [#104](https://github.com/gmickel/flow-next/pull/104)
+- **`parse_builder_tab` tolerates JSON-shaped responses** — now tries regex patterns (`Tab:`, `T=`, `"tab_id"`, `"tab"`) then falls back to recursive JSON walking before failing. No more fatal errors on newer RP response shapes.
+- **`parse_manage_workspaces` unwraps nested result objects** — handles `{"result": {"workspaces": [...]}}` JSON-RPC style payloads with bounded recursive unwrapping. String workspace names are preserved as `{"name": item}` dicts instead of dropped.
+- **Windows: ralph-guard state file uses `tempfile.gettempdir()`** — hardcoded `/tmp` path resolved to `\tmp\` on Windows and failed. Pre-existing bug exposed by new regression tests.
+
+### Added
+- `try_run_rp_cli` — graceful-failure variant of `run_rp_cli` for optional capability probing (e.g. newer RepoPrompt features)
+- `bind_context_window` helper — prefers RepoPrompt's native repo-path binding when available, falls back to legacy window/workspace matching
+- Regression test coverage for RepoPrompt setup-review: bind_context fast path, visible workspace reuse, hidden workspace reopen, nested result unwrap, string workspace names
+
 ## [flow-next 0.29.0] - 2026-04-05
 
 ### Added
