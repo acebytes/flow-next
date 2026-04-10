@@ -735,6 +735,7 @@ def build_chat_payload(
     chat_name: Optional[str] = None,
     chat_id: Optional[str] = None,
     selected_paths: Optional[list[str]] = None,
+    include_legacy_fields: bool = True,
 ) -> str:
     payload: dict[str, Any] = {
         "message": message,
@@ -742,12 +743,13 @@ def build_chat_payload(
     }
     if new_chat:
         payload["new_chat"] = True
-    if chat_name:
-        payload["chat_name"] = chat_name
     if chat_id:
         payload["chat_id"] = chat_id
-    if selected_paths:
-        payload["selected_paths"] = selected_paths
+    if include_legacy_fields:
+        if chat_name:
+            payload["chat_name"] = chat_name
+        if selected_paths:
+            payload["selected_paths"] = selected_paths
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -5610,7 +5612,14 @@ def cmd_rp_chat_send(args: argparse.Namespace) -> None:
     message = read_text_or_exit(Path(args.message_file), "Message file", use_json=False)
     chat_id_arg = getattr(args, "chat_id", None)
     mode = getattr(args, "mode", "chat") or "chat"
-    payload = build_chat_payload(
+    oracle_payload = build_chat_payload(
+        message=message,
+        mode=mode,
+        new_chat=args.new_chat,
+        chat_id=chat_id_arg,
+        include_legacy_fields=False,
+    )
+    legacy_payload = build_chat_payload(
         message=message,
         mode=mode,
         new_chat=args.new_chat,
@@ -5618,15 +5627,25 @@ def cmd_rp_chat_send(args: argparse.Namespace) -> None:
         chat_id=chat_id_arg,
         selected_paths=args.selected_paths,
     )
-    cmd = [
+    oracle_cmd = [
         "-w",
         str(args.window),
         "-t",
         args.tab,
         "-e",
-        f"call chat_send {payload}",
+        f"call oracle_send {oracle_payload}",
     ]
-    res = run_rp_cli(cmd)
+    legacy_cmd = [
+        "-w",
+        str(args.window),
+        "-t",
+        args.tab,
+        "-e",
+        f"call chat_send {legacy_payload}",
+    ]
+    res = try_run_rp_cli(oracle_cmd)
+    if res is None:
+        res = run_rp_cli(legacy_cmd)
     output = (res.stdout or "") + ("\n" + res.stderr if res.stderr else "")
     chat_id = parse_chat_id(output)
     if args.json:

@@ -536,6 +536,154 @@ PYTEST
 [[ $? -eq 0 ]] && pass "RepoPrompt setup-review regression" || fail "RepoPrompt setup-review regression"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 6c. RepoPrompt Chat Send Compatibility
+# ─────────────────────────────────────────────────────────────────────────────
+echo -e "\n${YELLOW}--- RepoPrompt Chat Send Compatibility ---${NC}"
+
+"$PYTHON_BIN" - "$TEST_DIR" << 'PYTEST'
+import importlib.util
+import io
+import json
+import sys
+from argparse import Namespace
+from contextlib import redirect_stdout
+from pathlib import Path
+from types import SimpleNamespace
+
+test_dir = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location("flowctl", test_dir / "scripts/flowctl.py")
+flowctl = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(flowctl)
+
+errors = []
+
+
+def make_result(stdout="", stderr=""):
+    return SimpleNamespace(stdout=stdout, stderr=stderr)
+
+
+msg_file = test_dir / "chat-send.md"
+msg_file.write_text("Review this change.\n", encoding="utf-8")
+
+# Modern RepoPrompt: prefer oracle_send and strip legacy-only fields.
+oracle_calls = []
+legacy_calls = []
+
+
+def modern_try(args, timeout=None):
+    oracle_calls.append(args)
+    return make_result("## Chat Send ✅\n- **Chat**: `modern-chat`\n")
+
+
+def modern_run(args, timeout=None):
+    legacy_calls.append(args)
+    raise AssertionError(f"Legacy fallback should not run: {args}")
+
+
+flowctl.try_run_rp_cli = modern_try
+flowctl.run_rp_cli = modern_run
+modern_output = io.StringIO()
+with redirect_stdout(modern_output):
+    flowctl.cmd_rp_chat_send(
+        Namespace(
+            window=7,
+            tab="tab-modern",
+            message_file=str(msg_file),
+            new_chat=True,
+            chat_name="Smoke Preflight",
+            chat_id=None,
+            mode="review",
+            selected_paths=["src/a.cs", "src/b.cs"],
+            json=False,
+        )
+    )
+
+expected_modern = [
+    "-w",
+    "7",
+    "-t",
+    "tab-modern",
+    "-e",
+    'call oracle_send {"message":"Review this change.\\n","mode":"review","new_chat":true}',
+]
+if oracle_calls != [expected_modern]:
+    errors.append(f"modern chat-send should call oracle_send without legacy fields, got {oracle_calls!r}")
+if legacy_calls:
+    errors.append(f"modern chat-send unexpectedly used legacy fallback: {legacy_calls!r}")
+if "modern-chat" not in modern_output.getvalue():
+    errors.append(f"modern chat-send should print RepoPrompt response, got {modern_output.getvalue()!r}")
+
+# Legacy RepoPrompt: fall back to chat_send and preserve old payload fields.
+oracle_calls = []
+legacy_calls = []
+
+
+def legacy_try(args, timeout=None):
+    oracle_calls.append(args)
+    return None
+
+
+def legacy_run(args, timeout=None):
+    legacy_calls.append(args)
+    return make_result('{"chat_id":"legacy-chat"}')
+
+
+flowctl.try_run_rp_cli = legacy_try
+flowctl.run_rp_cli = legacy_run
+legacy_output = io.StringIO()
+with redirect_stdout(legacy_output):
+    flowctl.cmd_rp_chat_send(
+        Namespace(
+            window=9,
+            tab="tab-legacy",
+            message_file=str(msg_file),
+            new_chat=True,
+            chat_name="Legacy Chat",
+            chat_id="chat-123",
+            mode="chat",
+            selected_paths=["spec.md"],
+            json=True,
+        )
+    )
+
+expected_legacy = [
+    "-w",
+    "9",
+    "-t",
+    "tab-legacy",
+    "-e",
+    'call chat_send {"message":"Review this change.\\n","mode":"chat","new_chat":true,"chat_id":"chat-123","chat_name":"Legacy Chat","selected_paths":["spec.md"]}',
+]
+if oracle_calls != [[
+    "-w",
+    "9",
+    "-t",
+    "tab-legacy",
+    "-e",
+    'call oracle_send {"message":"Review this change.\\n","mode":"chat","new_chat":true,"chat_id":"chat-123"}',
+]]:
+    errors.append(f"legacy fallback should probe oracle_send first, got {oracle_calls!r}")
+if legacy_calls != [expected_legacy]:
+    errors.append(f"legacy fallback should preserve chat_send payload, got {legacy_calls!r}")
+try:
+    parsed = json.loads(legacy_output.getvalue())
+except json.JSONDecodeError as exc:
+    errors.append(f"legacy chat-send should emit JSON output: {exc}")
+else:
+    if parsed.get("chat") != "legacy-chat":
+        errors.append(f"legacy chat-send should parse chat id from fallback output, got {parsed!r}")
+
+if errors:
+    print("RepoPrompt chat-send compatibility errors:")
+    for error in errors:
+        print(f"  - {error}")
+    sys.exit(1)
+
+print("RepoPrompt chat-send compatibility passed")
+PYTEST
+[[ $? -eq 0 ]] && pass "RepoPrompt chat-send compatibility" || fail "RepoPrompt chat-send compatibility"
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 7. ralph.sh Helper Functions
 # ─────────────────────────────────────────────────────────────────────────────
 echo -e "\n${YELLOW}--- ralph.sh Helpers ---${NC}"
