@@ -374,7 +374,7 @@ import json
 import sys
 import tempfile
 from argparse import Namespace
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -546,7 +546,7 @@ import io
 import json
 import sys
 from argparse import Namespace
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -562,6 +562,10 @@ def make_result(stdout="", stderr=""):
     return SimpleNamespace(stdout=stdout, stderr=stderr)
 
 
+def make_completed(stdout="", stderr="", returncode=0):
+    return SimpleNamespace(stdout=stdout, stderr=stderr, returncode=returncode)
+
+
 msg_file = test_dir / "chat-send.md"
 msg_file.write_text("Review this change.\n", encoding="utf-8")
 
@@ -570,9 +574,9 @@ oracle_calls = []
 legacy_calls = []
 
 
-def modern_try(args, timeout=None):
+def modern_unchecked(args, timeout=None):
     oracle_calls.append(args)
-    return make_result("## Chat Send ✅\n- **Chat**: `modern-chat`\n")
+    return make_completed("## Chat Send ✅\n- **Chat**: `modern-chat`\n")
 
 
 def modern_run(args, timeout=None):
@@ -580,7 +584,7 @@ def modern_run(args, timeout=None):
     raise AssertionError(f"Legacy fallback should not run: {args}")
 
 
-flowctl.try_run_rp_cli = modern_try
+flowctl.run_rp_cli_unchecked = modern_unchecked
 flowctl.run_rp_cli = modern_run
 modern_output = io.StringIO()
 with redirect_stdout(modern_output):
@@ -618,9 +622,9 @@ oracle_calls = []
 legacy_calls = []
 
 
-def legacy_try(args, timeout=None):
+def legacy_unchecked(args, timeout=None):
     oracle_calls.append(args)
-    return None
+    return make_completed(stderr="Error:\nTool not found: oracle_send", returncode=2)
 
 
 def legacy_run(args, timeout=None):
@@ -628,7 +632,7 @@ def legacy_run(args, timeout=None):
     return make_result('{"chat_id":"legacy-chat"}')
 
 
-flowctl.try_run_rp_cli = legacy_try
+flowctl.run_rp_cli_unchecked = legacy_unchecked
 flowctl.run_rp_cli = legacy_run
 legacy_output = io.StringIO()
 with redirect_stdout(legacy_output):
@@ -672,6 +676,49 @@ except json.JSONDecodeError as exc:
 else:
     if parsed.get("chat") != "legacy-chat":
         errors.append(f"legacy chat-send should parse chat id from fallback output, got {parsed!r}")
+
+# Real oracle_send failures should surface directly instead of falling back.
+oracle_calls = []
+legacy_calls = []
+
+
+def broken_unchecked(args, timeout=None):
+    oracle_calls.append(args)
+    return make_completed(stderr="Error:\n[-32602] Invalid params: bad tab", returncode=1)
+
+
+def broken_run(args, timeout=None):
+    legacy_calls.append(args)
+    raise AssertionError(f"Legacy fallback should not run for real oracle failures: {args}")
+
+
+flowctl.run_rp_cli_unchecked = broken_unchecked
+flowctl.run_rp_cli = broken_run
+broken_stderr = io.StringIO()
+try:
+    with redirect_stderr(broken_stderr):
+        flowctl.cmd_rp_chat_send(
+            Namespace(
+                window=3,
+                tab="bad-tab",
+                message_file=str(msg_file),
+                new_chat=False,
+                chat_name=None,
+                chat_id=None,
+                mode="chat",
+                selected_paths=None,
+                json=False,
+            )
+        )
+except SystemExit as exc:
+    if exc.code != 2:
+        errors.append(f"real oracle failures should exit 2, got {exc.code!r}")
+else:
+    errors.append("real oracle failures should exit instead of falling back")
+if "Invalid params: bad tab" not in broken_stderr.getvalue():
+    errors.append(f"real oracle failure should preserve original error, got {broken_stderr.getvalue()!r}")
+if legacy_calls:
+    errors.append(f"real oracle failures should not call legacy chat_send, got {legacy_calls!r}")
 
 if errors:
     print("RepoPrompt chat-send compatibility errors:")

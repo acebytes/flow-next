@@ -417,6 +417,24 @@ def run_rp_cli(
         error_exit(f"rp-cli failed: {msg}", use_json=False, code=2)
 
 
+def run_rp_cli_unchecked(
+    args: list[str], timeout: Optional[int] = None
+) -> subprocess.CompletedProcess:
+    """Run rp-cli without collapsing command failures.
+
+    Used when a caller needs to inspect stderr/stdout before deciding whether a
+    failure is a capability mismatch or a real RepoPrompt error.
+    """
+    if timeout is None:
+        timeout = int(os.environ.get("FLOW_RP_TIMEOUT", "1200"))
+    rp = require_rp_cli()
+    cmd = [rp] + args
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        error_exit(f"rp-cli timed out after {timeout}s", use_json=False, code=3)
+
+
 def try_run_rp_cli(
     args: list[str], timeout: Optional[int] = None
 ) -> Optional[subprocess.CompletedProcess]:
@@ -435,6 +453,17 @@ def try_run_rp_cli(
         )
     except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
         return None
+
+
+def is_rp_tool_missing_error(output: str, tool_name: str) -> bool:
+    """Return true only for clear RepoPrompt missing-tool capability errors."""
+    patterns = [
+        rf"\bTool not found:\s*{re.escape(tool_name)}\b",
+        rf"\bUnknown tool:\s*{re.escape(tool_name)}\b",
+        rf"\bUnknown function:\s*{re.escape(tool_name)}\b",
+        rf"\bNo such tool:\s*{re.escape(tool_name)}\b",
+    ]
+    return any(re.search(pattern, output, re.I) for pattern in patterns)
 
 
 def normalize_repo_root(path: str) -> list[str]:
@@ -5643,8 +5672,11 @@ def cmd_rp_chat_send(args: argparse.Namespace) -> None:
         "-e",
         f"call chat_send {legacy_payload}",
     ]
-    res = try_run_rp_cli(oracle_cmd)
-    if res is None:
+    res = run_rp_cli_unchecked(oracle_cmd)
+    if res.returncode != 0:
+        oracle_error = (res.stderr or res.stdout or "").strip()
+        if not is_rp_tool_missing_error(oracle_error, "oracle_send"):
+            error_exit(f"rp-cli failed: {oracle_error}", use_json=False, code=2)
         res = run_rp_cli(legacy_cmd)
     output = (res.stdout or "") + ("\n" + res.stderr if res.stderr else "")
     chat_id = parse_chat_id(output)
