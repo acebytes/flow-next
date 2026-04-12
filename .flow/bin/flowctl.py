@@ -417,6 +417,55 @@ def run_rp_cli(
         error_exit(f"rp-cli failed: {msg}", use_json=False, code=2)
 
 
+def run_rp_cli_unchecked(
+    args: list[str], timeout: Optional[int] = None
+) -> subprocess.CompletedProcess:
+    """Run rp-cli without collapsing command failures.
+
+    Used when a caller needs to inspect stderr/stdout before deciding whether a
+    failure is a capability mismatch or a real RepoPrompt error.
+    """
+    if timeout is None:
+        timeout = int(os.environ.get("FLOW_RP_TIMEOUT", "1200"))
+    rp = require_rp_cli()
+    cmd = [rp] + args
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        error_exit(f"rp-cli timed out after {timeout}s", use_json=False, code=3)
+
+
+def try_run_rp_cli(
+    args: list[str], timeout: Optional[int] = None
+) -> Optional[subprocess.CompletedProcess]:
+    """Run rp-cli and return None on failure.
+
+    Used for optional capability probing where newer RepoPrompt features may not
+    exist yet and flowctl should fall back gracefully.
+    """
+    if timeout is None:
+        timeout = int(os.environ.get("FLOW_RP_TIMEOUT", "1200"))
+    rp = require_rp_cli()
+    cmd = [rp] + args
+    try:
+        return subprocess.run(
+            cmd, capture_output=True, text=True, check=True, timeout=timeout
+        )
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        return None
+
+
+def is_rp_tool_missing_error(output: str, tool_name: str) -> bool:
+    """Return true only for clear RepoPrompt missing-tool capability errors."""
+    patterns = [
+        rf"\bTool not found:\s*{re.escape(tool_name)}\b",
+        rf"\bUnknown tool:\s*{re.escape(tool_name)}\b",
+        rf"\bUnknown function:\s*{re.escape(tool_name)}\b",
+        rf"\bNo such tool:\s*{re.escape(tool_name)}\b",
+    ]
+    return any(re.search(pattern, output, re.I) for pattern in patterns)
+
+
 def normalize_repo_root(path: str) -> list[str]:
     """Normalize repo root for window matching."""
     root = os.path.realpath(path)
@@ -448,7 +497,7 @@ def parse_windows(raw: str) -> list[dict[str, Any]]:
 
 
 def extract_window_id(win: dict[str, Any]) -> Optional[int]:
-    for key in ("windowID", "windowId", "id"):
+    for key in ("windowID", "windowId", "window_id", "id"):
         if key in win:
             try:
                 return int(win[key])
@@ -468,11 +517,234 @@ def extract_root_paths(win: dict[str, Any]) -> list[str]:
     return []
 
 
+def parse_manage_workspaces(raw: str) -> list[dict[str, Any]]:
+    """Parse manage_workspaces list JSON, tolerating nested wrappers."""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        error_exit(
+            f"manage_workspaces list JSON parse failed: {e}",
+            use_json=False,
+            code=2,
+        )
+
+    for _ in range(4):
+        if isinstance(data, list):
+            break
+        if isinstance(data, dict):
+            for key in ("workspaces", "result", "data"):
+                if key in data:
+                    data = data[key]
+                    break
+            else:
+                break
+        else:
+            break
+
+    if isinstance(data, list):
+        workspaces: list[dict[str, Any]] = []
+        for item in data:
+            if isinstance(item, dict):
+                workspaces.append(item)
+            elif isinstance(item, str):
+                workspaces.append({"name": item})
+        return workspaces
+
+    error_exit("manage_workspaces list JSON has unexpected shape", use_json=False, code=2)
+
+
+def extract_workspace_id(workspace: dict[str, Any]) -> Optional[str]:
+    for key in ("id", "workspace_id", "workspaceId", "uuid"):
+        val = workspace.get(key)
+        if val is not None:
+            return str(val)
+    return None
+
+
+def extract_workspace_name(workspace: dict[str, Any]) -> Optional[str]:
+    for key in ("name", "workspace", "title"):
+        val = workspace.get(key)
+        if val is not None:
+            return str(val)
+    return None
+
+
+def extract_workspace_paths(workspace: dict[str, Any]) -> list[str]:
+    for key in (
+        "repoPaths",
+        "repo_paths",
+        "rootFolderPaths",
+        "rootFolders",
+        "folderPaths",
+        "folder_paths",
+        "paths",
+    ):
+        if key in workspace:
+            val = workspace[key]
+            if isinstance(val, list):
+                return [str(v) for v in val]
+            if isinstance(val, str):
+                return [val]
+
+    for key in ("folder_path", "repoPath", "repo_path", "path"):
+        val = workspace.get(key)
+        if isinstance(val, str):
+            return [val]
+
+    return []
+
+
+def extract_workspace_window_ids(workspace: dict[str, Any]) -> list[int]:
+    for key in (
+        "showingInWindows",
+        "showing_in_windows",
+        "showingWindows",
+        "window_ids",
+        "windowIds",
+        "windows",
+    ):
+        if key not in workspace:
+            continue
+
+        val = workspace[key]
+        items = val if isinstance(val, list) else [val]
+        window_ids: list[int] = []
+
+        for item in items:
+            if isinstance(item, dict):
+                win_id = extract_window_id(item)
+                if win_id is not None:
+                    window_ids.append(win_id)
+                continue
+
+            try:
+                window_ids.append(int(item))
+            except Exception:
+                continue
+
+        return list(dict.fromkeys(window_ids))
+
+    return []
+
+
+def workspace_matches_roots(workspace: dict[str, Any], roots: list[str]) -> bool:
+    for path in extract_workspace_paths(workspace):
+        real_path = os.path.realpath(path)
+        if real_path in roots or path in roots:
+            return True
+    return False
+
+
+def find_workspace_for_repo(
+    workspaces: list[dict[str, Any]], roots: list[str], preferred_window: Optional[int] = None
+) -> Optional[dict[str, Any]]:
+    matches = [ws for ws in workspaces if workspace_matches_roots(ws, roots)]
+    if not matches:
+        return None
+
+    if preferred_window is not None:
+        for workspace in matches:
+            if preferred_window in extract_workspace_window_ids(workspace):
+                return workspace
+
+    visible = [ws for ws in matches if extract_workspace_window_ids(ws)]
+    if visible:
+        return sorted(
+            visible,
+            key=lambda ws: (
+                min(extract_workspace_window_ids(ws)),
+                extract_workspace_name(ws) or "",
+            ),
+        )[0]
+
+    return matches[0]
+
+
+def extract_response_window_id(data: Any) -> Optional[int]:
+    if isinstance(data, dict):
+        win_id = extract_window_id(data)
+        if win_id is not None:
+            return win_id
+        for key in ("result", "data"):
+            if key in data:
+                win_id = extract_response_window_id(data[key])
+                if win_id is not None:
+                    return win_id
+        return None
+
+    if isinstance(data, list):
+        for item in data:
+            win_id = extract_response_window_id(item)
+            if win_id is not None:
+                return win_id
+
+    return None
+
+
+def extract_builder_tab_from_payload(data: Any) -> Optional[str]:
+    if isinstance(data, dict):
+        for key in ("tab_id", "tab", "tabId", "context_id", "context", "contextId"):
+            val = data.get(key)
+            if isinstance(val, str) and val:
+                return val
+        for key in ("result", "review", "data"):
+            if key in data:
+                tab = extract_builder_tab_from_payload(data[key])
+                if tab:
+                    return tab
+        return None
+
+    if isinstance(data, list):
+        for item in data:
+            tab = extract_builder_tab_from_payload(item)
+            if tab:
+                return tab
+
+    return None
+
+
+def bind_context_window(repo_root: str) -> Optional[int]:
+    """Prefer RepoPrompt's bind_context repo-path matching when available."""
+    payload = {"op": "bind", "working_dirs": normalize_repo_root(repo_root)}
+    result = try_run_rp_cli(
+        ["--raw-json", "-e", f"call bind_context {json.dumps(payload)}"]
+    )
+    if result is None:
+        return None
+
+    try:
+        data = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        return None
+
+    return extract_response_window_id(data)
+
+
 def parse_builder_tab(output: str) -> str:
-    match = re.search(r"Tab:\s*([A-Za-z0-9-]+)", output)
-    if not match:
-        error_exit("builder output missing Tab id", use_json=False, code=2)
-    return match.group(1)
+    for pattern in (
+        r"Tab:\s*([A-Za-z0-9-]+)",
+        r"Context:\s*([A-Za-z0-9-]+)",
+        r"\bT=([A-Za-z0-9-]+)\b",
+        r'"tab_id"\s*:\s*"([^\"]+)"',
+        r'"tab"\s*:\s*"([^\"]+)"',
+        r'"context_id"\s*:\s*"([^\"]+)"',
+        r'"context"\s*:\s*"([^\"]+)"',
+    ):
+        match = re.search(pattern, output)
+        if match:
+            return match.group(1)
+
+    try:
+        data = json.loads(output)
+    except json.JSONDecodeError:
+        data = None
+
+    if data is not None:
+        tab = extract_builder_tab_from_payload(data)
+        if tab:
+            return tab
+
+    error_exit("builder output missing tab/context id", use_json=False, code=2)
 
 
 def parse_chat_id(output: str) -> Optional[str]:
@@ -492,6 +764,7 @@ def build_chat_payload(
     chat_name: Optional[str] = None,
     chat_id: Optional[str] = None,
     selected_paths: Optional[list[str]] = None,
+    include_legacy_fields: bool = True,
 ) -> str:
     payload: dict[str, Any] = {
         "message": message,
@@ -499,12 +772,13 @@ def build_chat_payload(
     }
     if new_chat:
         payload["new_chat"] = True
-    if chat_name:
-        payload["chat_name"] = chat_name
     if chat_id:
         payload["chat_id"] = chat_id
-    if selected_paths:
-        payload["selected_paths"] = selected_paths
+    if include_legacy_fields:
+        if chat_name:
+            payload["chat_name"] = chat_name
+        if selected_paths:
+            payload["selected_paths"] = selected_paths
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -745,16 +1019,17 @@ def get_embedded_file_contents(file_paths: list[str]) -> tuple[str, dict]:
 
     Environment:
         FLOW_CODEX_EMBED_MAX_BYTES: Total byte budget for embedded files.
-            Default 102400 (100KB). Set to 0 for unlimited.
+            Default 512000 (500KB). Set to 0 for unlimited.
     """
     repo_root = get_repo_root()
 
-    # Get budget from env (default 100KB to prevent oversized prompts)
-    max_bytes_str = os.environ.get("FLOW_CODEX_EMBED_MAX_BYTES", "102400")
+    # Get budget from env (default 500KB — large enough for complex epics with
+    # many source files while still preventing excessively large prompts)
+    max_bytes_str = os.environ.get("FLOW_CODEX_EMBED_MAX_BYTES", "512000")
     try:
         max_total_bytes = int(max_bytes_str)
     except ValueError:
-        max_total_bytes = 102400  # Invalid value uses default
+        max_total_bytes = 512000  # Invalid value uses default
 
     stats = {
         "embedded": 0,
@@ -5172,6 +5447,15 @@ def cmd_rp_windows(args: argparse.Namespace) -> None:
 def cmd_rp_pick_window(args: argparse.Namespace) -> None:
     repo_root = args.repo_root
     roots = normalize_repo_root(repo_root)
+
+    win_id = bind_context_window(repo_root)
+    if win_id is not None:
+        if args.json:
+            print(json.dumps({"window": win_id}))
+        else:
+            print(win_id)
+        return
+
     result = run_rp_cli(["--raw-json", "-e", "windows"])
     windows = parse_windows(result.stdout or "")
     if len(windows) == 1 and not extract_root_paths(windows[0]):
@@ -5194,6 +5478,25 @@ def cmd_rp_pick_window(args: argparse.Namespace) -> None:
                 else:
                     print(win_id)
                 return
+
+    workspaces_res = run_rp_cli(
+        [
+            "--raw-json",
+            "-e",
+            f"call manage_workspaces {json.dumps({'action': 'list'})}",
+        ]
+    )
+    workspace = find_workspace_for_repo(parse_manage_workspaces(workspaces_res.stdout or ""), roots)
+    if workspace:
+        window_ids = extract_workspace_window_ids(workspace)
+        if window_ids:
+            win_id = sorted(window_ids)[0]
+            if args.json:
+                print(json.dumps({"window": win_id}))
+            else:
+                print(win_id)
+            return
+
     error_exit("No window matches repo root", use_json=False, code=2)
 
 
@@ -5210,31 +5513,11 @@ def cmd_rp_ensure_workspace(args: argparse.Namespace) -> None:
         f"call manage_workspaces {json.dumps({'action': 'list'})}",
     ]
     list_res = run_rp_cli(list_cmd)
-    try:
-        data = json.loads(list_res.stdout)
-    except json.JSONDecodeError as e:
-        error_exit(f"workspace list JSON parse failed: {e}", use_json=False, code=2)
+    workspaces = parse_manage_workspaces(list_res.stdout or "")
+    roots = normalize_repo_root(repo_root)
+    workspace = find_workspace_for_repo(workspaces, roots, preferred_window=window)
 
-    def extract_names(obj: Any) -> set[str]:
-        names: set[str] = set()
-        if isinstance(obj, dict):
-            if "workspaces" in obj:
-                obj = obj["workspaces"]
-            elif "result" in obj:
-                obj = obj["result"]
-        if isinstance(obj, list):
-            for item in obj:
-                if isinstance(item, str):
-                    names.add(item)
-                elif isinstance(item, dict):
-                    for key in ("name", "workspace", "title"):
-                        if key in item:
-                            names.add(str(item[key]))
-        return names
-
-    names = extract_names(data)
-
-    if ws_name not in names:
+    if workspace is None:
         create_cmd = [
             "-w",
             str(window),
@@ -5242,12 +5525,21 @@ def cmd_rp_ensure_workspace(args: argparse.Namespace) -> None:
             f"call manage_workspaces {json.dumps({'action': 'create', 'name': ws_name, 'folder_path': repo_root})}",
         ]
         run_rp_cli(create_cmd)
+        list_res = run_rp_cli(list_cmd)
+        workspaces = parse_manage_workspaces(list_res.stdout or "")
+        workspace = find_workspace_for_repo(workspaces, roots, preferred_window=window)
+
+    workspace_ref = None
+    if workspace is not None:
+        workspace_ref = extract_workspace_id(workspace) or extract_workspace_name(workspace)
+    if workspace_ref is None:
+        workspace_ref = ws_name
 
     switch_cmd = [
         "-w",
         str(window),
         "-e",
-        f"call manage_workspaces {json.dumps({'action': 'switch', 'workspace': ws_name, 'window_id': window})}",
+        f"call manage_workspaces {json.dumps({'action': 'switch', 'workspace': workspace_ref, 'window_id': window})}",
     ]
     run_rp_cli(switch_cmd)
 
@@ -5257,7 +5549,6 @@ def cmd_rp_builder(args: argparse.Namespace) -> None:
     summary = args.summary
     response_type = getattr(args, "response_type", None)
 
-    # Build builder command with optional --type flag (shorthand for response_type)
     builder_expr = f"builder {json.dumps(summary)}"
     if response_type:
         builder_expr += f" --type {response_type}"
@@ -5269,15 +5560,14 @@ def cmd_rp_builder(args: argparse.Namespace) -> None:
         "-e",
         builder_expr,
     ]
-    cmd = [c for c in cmd if c]  # Remove empty strings
+    cmd = [c for c in cmd if c]
     res = run_rp_cli(cmd)
     output = (res.stdout or "") + ("\n" + res.stderr if res.stderr else "")
 
-    # For review response-type, parse the full JSON response
     if response_type == "review":
         try:
             data = json.loads(res.stdout or "{}")
-            tab = data.get("tab_id", "")
+            tab = extract_builder_tab_from_payload(data) or ""
             chat_id = data.get("review", {}).get("chat_id", "")
             review_response = data.get("review", {}).get("response", "")
             if args.json:
@@ -5351,7 +5641,14 @@ def cmd_rp_chat_send(args: argparse.Namespace) -> None:
     message = read_text_or_exit(Path(args.message_file), "Message file", use_json=False)
     chat_id_arg = getattr(args, "chat_id", None)
     mode = getattr(args, "mode", "chat") or "chat"
-    payload = build_chat_payload(
+    oracle_payload = build_chat_payload(
+        message=message,
+        mode=mode,
+        new_chat=args.new_chat,
+        chat_id=chat_id_arg,
+        include_legacy_fields=False,
+    )
+    legacy_payload = build_chat_payload(
         message=message,
         mode=mode,
         new_chat=args.new_chat,
@@ -5359,15 +5656,28 @@ def cmd_rp_chat_send(args: argparse.Namespace) -> None:
         chat_id=chat_id_arg,
         selected_paths=args.selected_paths,
     )
-    cmd = [
+    oracle_cmd = [
         "-w",
         str(args.window),
         "-t",
         args.tab,
         "-e",
-        f"call chat_send {payload}",
+        f"call oracle_send {oracle_payload}",
     ]
-    res = run_rp_cli(cmd)
+    legacy_cmd = [
+        "-w",
+        str(args.window),
+        "-t",
+        args.tab,
+        "-e",
+        f"call chat_send {legacy_payload}",
+    ]
+    res = run_rp_cli_unchecked(oracle_cmd)
+    if res.returncode != 0:
+        oracle_error = (res.stderr or res.stdout or "").strip()
+        if not is_rp_tool_missing_error(oracle_error, "oracle_send"):
+            error_exit(f"rp-cli failed: {oracle_error}", use_json=False, code=2)
+        res = run_rp_cli(legacy_cmd)
     output = (res.stdout or "") + ("\n" + res.stderr if res.stderr else "")
     chat_id = parse_chat_id(output)
     if args.json:
@@ -5409,16 +5719,17 @@ def cmd_rp_setup_review(args: argparse.Namespace) -> None:
 
     # Step 1: pick-window
     roots = normalize_repo_root(repo_root)
-    result = run_rp_cli(["--raw-json", "-e", "windows"])
-    windows = parse_windows(result.stdout or "")
-
-    win_id: Optional[int] = None
+    win_id = bind_context_window(repo_root)
+    windows: list[dict[str, Any]] = []
+    if win_id is None:
+        result = run_rp_cli(["--raw-json", "-e", "windows"])
+        windows = parse_windows(result.stdout or "")
 
     # Single window with no root paths - use it
-    if len(windows) == 1 and not extract_root_paths(windows[0]):
+    if win_id is None and len(windows) == 1 and not extract_root_paths(windows[0]):
         win_id = extract_window_id(windows[0])
 
-    # Otherwise match by root
+    # Otherwise match by root.
     if win_id is None:
         for win in windows:
             wid = extract_window_id(win)
@@ -5431,15 +5742,59 @@ def cmd_rp_setup_review(args: argparse.Namespace) -> None:
             if win_id is not None:
                 break
 
+    # Fall back to workspace inventory when window root metadata is missing.
+    if win_id is None:
+        workspaces_res = run_rp_cli(
+            [
+                "--raw-json",
+                "-e",
+                f"call manage_workspaces {json.dumps({'action': 'list'})}",
+            ]
+        )
+        workspace = find_workspace_for_repo(
+            parse_manage_workspaces(workspaces_res.stdout or ""),
+            roots,
+        )
+
+        if workspace:
+            window_ids = extract_workspace_window_ids(workspace)
+            if window_ids:
+                win_id = sorted(window_ids)[0]
+            elif getattr(args, "create", False):
+                workspace_ref = extract_workspace_id(workspace) or extract_workspace_name(workspace)
+                if workspace_ref is not None:
+                    switch_cmd = {
+                        "action": "switch",
+                        "workspace": workspace_ref,
+                        "open_in_new_window": True,
+                    }
+                    switch_res = run_rp_cli(
+                        [
+                            "--raw-json",
+                            "-e",
+                            f"call manage_workspaces {json.dumps(switch_cmd)}",
+                        ]
+                    )
+                    try:
+                        switch_data = json.loads(switch_res.stdout or "{}")
+                    except json.JSONDecodeError as e:
+                        error_exit(
+                            f"workspace switch JSON parse failed: {e}",
+                            use_json=False,
+                            code=2,
+                        )
+                    win_id = extract_response_window_id(switch_data)
+
     if win_id is None:
         if getattr(args, "create", False):
-            # Auto-create window via workspace create --new-window (RP 1.5.68+)
             ws_name = os.path.basename(repo_root)
-            create_cmd = f"workspace create {shlex.quote(ws_name)} --new-window --folder-path {shlex.quote(repo_root)}"
+            create_cmd = (
+                f"workspace create {shlex.quote(ws_name)} --new-window --folder-path {shlex.quote(repo_root)}"
+            )
             create_res = run_rp_cli(["--raw-json", "-e", create_cmd])
             try:
                 data = json.loads(create_res.stdout or "{}")
-                win_id = data.get("window_id")
+                win_id = extract_response_window_id(data)
             except json.JSONDecodeError:
                 pass
             if not win_id:
@@ -5453,7 +5808,7 @@ def cmd_rp_setup_review(args: argparse.Namespace) -> None:
 
     # Write state file for ralph-guard verification
     repo_hash = hashlib.sha256(repo_root.encode()).hexdigest()[:16]
-    state_file = Path(f"/tmp/.ralph-pick-window-{repo_hash}")
+    state_file = Path(tempfile.gettempdir()) / f".ralph-pick-window-{repo_hash}"
     state_file.write_text(f"{win_id}\n{repo_root}\n")
 
     # Step 2: builder (with optional --type flag for RP 1.6.0+)
@@ -5478,12 +5833,12 @@ def cmd_rp_setup_review(args: argparse.Namespace) -> None:
     if response_type == "review":
         try:
             data = json.loads(builder_res.stdout or "{}")
-            tab = data.get("tab_id", "")
+            tab = extract_builder_tab_from_payload(data) or ""
             chat_id = data.get("review", {}).get("chat_id", "")
             review_response = data.get("review", {}).get("response", "")
 
             if not tab:
-                error_exit("Builder did not return a tab id", use_json=False, code=2)
+                error_exit("Builder did not return a tab/context id", use_json=False, code=2)
 
             if args.json:
                 print(
@@ -5508,7 +5863,7 @@ def cmd_rp_setup_review(args: argparse.Namespace) -> None:
     else:
         tab = parse_builder_tab(output)
         if not tab:
-            error_exit("Builder did not return a tab id", use_json=False, code=2)
+            error_exit("Builder did not return a tab/context id", use_json=False, code=2)
 
         if args.json:
             print(json.dumps({"window": win_id, "tab": tab, "repo_root": repo_root}))
@@ -5701,25 +6056,18 @@ def cmd_codex_impl_review(args: argparse.Namespace) -> None:
     except (subprocess.CalledProcessError, OSError):
         pass
 
-    # Embed changed file contents for codex only on Windows (sandbox is broken there)
-    # Unix sandbox works correctly, so no embedding needed
-    if os.name == "nt":
-        changed_files = get_changed_files(base_branch)
-        embedded_content, embed_stats = get_embedded_file_contents(changed_files)
-    else:
-        embedded_content = ""
-        embed_stats = {
-            "embedded": 0,
-            "total": 0,
-            "bytes": 0,
-            "binary_skipped": [],
-            "deleted_skipped": [],
-            "outside_repo_skipped": [],
-            "budget_skipped": [],
-        }
+    # Always embed changed file contents so Codex doesn't waste turns reading
+    # files from disk. Without embedding, Codex exhausts its turn budget on
+    # sed/rg commands before producing a verdict (observed 114 turns with no
+    # verdict on complex epics). The FLOW_CODEX_EMBED_MAX_BYTES budget cap
+    # prevents oversized prompts.
+    changed_files = get_changed_files(base_branch)
+    embedded_content, embed_stats = get_embedded_file_contents(changed_files)
 
-    # Build prompt
-    files_embedded = os.name == "nt"
+    # Only forbid disk reads when ALL files were fully embedded. If the budget
+    # was exhausted or files were truncated, allow Codex to read the remainder
+    # from disk so it doesn't review with incomplete context.
+    files_embedded = not embed_stats.get("budget_skipped") and not embed_stats.get("truncated")
     if standalone:
         prompt = build_standalone_review_prompt(base_branch, focus, diff_summary, files_embedded)
         # Append embedded files and diff content to standalone prompt
@@ -5928,28 +6276,16 @@ def cmd_codex_plan_review(args: argparse.Namespace) -> None:
 
     task_specs = "\n\n---\n\n".join(task_specs_parts) if task_specs_parts else ""
 
-    # Embed specified file contents for codex only on Windows (sandbox is broken there)
-    # Unix sandbox works correctly, so no embedding needed
-    if os.name == "nt":
-        embedded_content, embed_stats = get_embedded_file_contents(file_paths)
-    else:
-        embedded_content = ""
-        embed_stats = {
-            "embedded": 0,
-            "total": 0,
-            "bytes": 0,
-            "binary_skipped": [],
-            "deleted_skipped": [],
-            "outside_repo_skipped": [],
-            "budget_skipped": [],
-        }
+    # Always embed file contents so Codex doesn't waste turns reading files
+    # from disk. See cmd_codex_impl_review comment for rationale.
+    embedded_content, embed_stats = get_embedded_file_contents(file_paths)
 
     # Get context hints (from main branch for plans)
     base_branch = args.base if hasattr(args, "base") and args.base else "main"
     context_hints = gather_context_hints(base_branch)
 
-    # Build prompt
-    files_embedded = os.name == "nt"
+    # Only forbid disk reads when ALL files were fully embedded.
+    files_embedded = not embed_stats.get("budget_skipped") and not embed_stats.get("truncated")
     prompt = build_review_prompt(
         "plan", epic_spec, context_hints, task_specs=task_specs, embedded_files=embedded_content,
         files_embedded=files_embedded
@@ -6302,15 +6638,13 @@ def cmd_codex_completion_review(args: argparse.Namespace) -> None:
     except (subprocess.CalledProcessError, OSError):
         pass
 
-    # Embed changed file contents for codex only on Windows
-    if os.name == "nt":
-        changed_files = get_changed_files(base_branch)
-        embedded_content, _ = get_embedded_file_contents(changed_files)
-    else:
-        embedded_content = ""
+    # Always embed changed file contents. See cmd_codex_impl_review comment
+    # for rationale.
+    changed_files = get_changed_files(base_branch)
+    embedded_content, embed_stats = get_embedded_file_contents(changed_files)
 
-    # Build prompt
-    files_embedded = os.name == "nt"
+    # Only forbid disk reads when ALL files were fully embedded.
+    files_embedded = not embed_stats.get("budget_skipped") and not embed_stats.get("truncated")
     prompt = build_completion_review_prompt(
         epic_spec,
         task_specs,
