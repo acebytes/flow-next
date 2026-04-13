@@ -43,6 +43,14 @@ scripts/ralph/flowctl validate --epic $(echo {{TASK_ID}} | sed 's/\.[0-9]*$//') 
 
 **Step 5: On hard failure** → output `<promise>FAIL</promise>` and stop.
 
+## Reviewer findings — fix ALL of them
+You are part of an autonomous loop that wrote ALL code on this branch across
+sequential tasks. There is no "pre-existing" code from other authors. If the
+reviewer flags an issue in ANY file — even one you did not modify in this
+task — you MUST fix it. Do NOT skip findings as "out of scope" or "from a
+previous task." Every finding is in scope. Skipping a finding causes the
+review to fail and wastes a retry.
+
 ## Rules
 - Must run `flowctl done` and verify task status is `done` before commit.
 - Must `git add -A` (never list files).

@@ -979,6 +979,7 @@ while (( iter <= MAX_ITERATIONS )); do
 3. NEVER CLAIM SUCCESS without proof. If flowctl done was not run, the task is NOT done.
 4. COPY TEMPLATES VERBATIM - receipt JSON must match exactly including all fields.
 5. USE SKILLS AS SPECIFIED - invoke /flow-next:impl-review, do not improvise review prompts.
+6. OWN ALL CODE IN THIS BRANCH. Every file on this branch was written by this same autonomous loop across sequential tasks. There is NO pre-existing code from other authors. If a reviewer flags ANY issue — even in files you did not touch in THIS task — you MUST fix it. Nothing is 'out of scope' or 'pre-existing'. Skipping a reviewer finding because it is in a different file is NEVER acceptable.
 Violations break automation and leave the user with incomplete work. Be precise, not creative.")
 
   [[ -n "${MAX_TURNS:-}" ]] && claude_args+=(--max-turns "$MAX_TURNS")
