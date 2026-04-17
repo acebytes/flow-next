@@ -17,7 +17,7 @@ Supports both review backends:
 """
 
 # Version for drift detection (bump when making changes)
-RALPH_GUARD_VERSION = "0.13.1"
+RALPH_GUARD_VERSION = "0.14.0"
 
 import json
 import os
@@ -349,11 +349,36 @@ def handle_pre_tool_use(data: dict) -> None:
                 if isinstance(done_set, list):
                     done_set = set(done_set)
                 if task_id not in done_set:
-                    output_block(
-                        f"BLOCKED: Cannot write impl receipt for {task_id} - flowctl done was not called. "
-                        f"You MUST run 'flowctl done {task_id} --evidence ...' BEFORE writing the receipt. "
-                        "The task is NOT complete until flowctl done succeeds."
-                    )
+                    # Fallback: subagents have different session_ids, so flowctl done
+                    # may have been called in a subagent session. Check actual task status.
+                    task_actually_done = False
+                    try:
+                        result = subprocess.run(
+                            ["scripts/ralph/flowctl", "show", task_id, "--json"],
+                            capture_output=True, text=True, timeout=5,
+                            cwd=str(get_repo_root()),
+                        )
+                        if result.returncode == 0:
+                            task_data = json.loads(result.stdout)
+                            if task_data.get("status") == "done":
+                                task_actually_done = True
+                                # Update session state so future checks pass
+                                done_set.add(task_id)
+                                state["flowctl_done_called"] = done_set
+                                save_state(session_id, state)
+                                with Path("/tmp/ralph-guard-debug.log").open("a") as f:
+                                    f.write(
+                                        f"  -> {task_id} verified done via flowctl show "
+                                        f"(subagent cross-session)\n"
+                                    )
+                    except Exception:
+                        pass
+                    if not task_actually_done:
+                        output_block(
+                            f"BLOCKED: Cannot write impl receipt for {task_id} - flowctl done was not called. "
+                            f"You MUST run 'flowctl done {task_id} --evidence ...' BEFORE writing the receipt. "
+                            "The task is NOT complete until flowctl done succeeds."
+                        )
 
     # All checks passed
     sys.exit(0)
@@ -461,13 +486,17 @@ def handle_post_tool_use(data: dict) -> None:
                     f"  -> Extracted task_id: {task_id}, response has 'status': {'status' in response_text.lower()}\n"
                 )
 
-            # Check response indicates success (has "status", "done", "updated", or "completed")
+            # Check response indicates the task is done. This includes:
+            # - Successful flowctl done (has "status", "updated", "completed")
+            # - Already-done errors ("already" + "done" in error response) from
+            #   subagent having called flowctl done first (different session_id)
             response_lower = response_text.lower()
             if (
                 "status" in response_lower
                 or "done" in response_lower
                 or "updated" in response_lower
                 or "completed" in response_lower
+                or "already" in response_lower
             ):
                 done_set = state.get("flowctl_done_called", set())
                 if isinstance(done_set, list):
