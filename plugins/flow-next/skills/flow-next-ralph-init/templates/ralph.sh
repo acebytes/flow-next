@@ -997,6 +997,7 @@ Violations break automation and leave the user with incomplete work. Be precise,
     fi
   fi
   [[ "${FLOW_RALPH_CLAUDE_VERBOSE:-}" == "1" ]] && claude_args+=(--verbose)
+  [[ -n "${FLOW_RALPH_CLAUDE_EFFORT:-}" ]] && claude_args+=(--append-system-prompt "/effort ${FLOW_RALPH_CLAUDE_EFFORT}")
 
   # Block Explore subagent auto-delegation - causes READ-ONLY failures in autonomous mode
   # Worker already has disallowedTools: Task but CLI-level is more reliable (precedence 2 vs 6)
