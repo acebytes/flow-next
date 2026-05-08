@@ -4,7 +4,9 @@ satisfies: [R20, R26, R27]
 
 ## Description
 
-Python unit tests for the new flowctl.py logic that bash smoke tests can't reach cleanly: migration step ordering + crash recovery, cross-platform `os.mkdir` lockfile contention with stale-PID reclaim, `_resolve_spec_json_path` fallback, write-location selector, JSON read-compat helpers across all four field categories (`epic`/`spec`, `epic_id`/`spec_id`, `next_epic`/`next_spec`, `epics`/`specs`), banner suppression matrix, and forward-compat downgrade parsing. T14 (bash smoke) verifies end-to-end behavior; T14b verifies the unit-level invariants with mocked filesystem + signals + env state.
+Python unit tests for the new flowctl.py logic that bash smoke tests can't reach cleanly: migration step ordering + crash recovery, cross-platform `os.mkdir` lockfile contention with stale-PID reclaim, `find_spec_json_path` fallback, write-location selector, JSON read-compat helpers across all four field categories (`epic`/`spec`, `epic_id`/`spec_id`, `next_epic`/`next_spec`, `epics`/`specs`), banner suppression matrix, and forward-compat downgrade parsing. T14 (bash smoke) verifies end-to-end behavior; T14b verifies the unit-level invariants with mocked filesystem + signals + env state. <!-- Updated by plan-sync: T1 shipped helper as find_spec_json_path not _resolve_spec_json_path -->
+
+Helpers landed in T2 that downstream tests should target: `_emit_rename_deprecation` (one-shot stderr per legacy form), `canonicalize_task_for_write` (strips `epic`/`epic_id` from persisted task JSON before write), `normalize_task` (in-place legacy 0.x epic->spec migration on read), `find_spec_json_path` (read-side filesystem fallback specs/<id>.json -> epics/<id>.json).
 
 **Size:** M
 **Files:**

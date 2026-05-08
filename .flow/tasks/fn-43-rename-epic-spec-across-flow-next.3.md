@@ -42,11 +42,11 @@ Implement the deterministic CLI migration path: `flowctl migrate-rename` (dry-ru
 ## Investigation targets
 
 **Required:**
-- `plugins/flow-next/scripts/flowctl.py:13151-13218` -- existing `cmd_migrate_state` pattern.
-- `plugins/flow-next/scripts/flowctl.py:7365` -- `cmd_memory_migrate`.
+- `plugins/flow-next/scripts/flowctl.py` -- existing `cmd_migrate_state` pattern; grep `def cmd_migrate_state` (line refs drifted post-T2). <!-- Updated by plan-sync: T2 added ~150 lines; line numbers stale -->
+- `plugins/flow-next/scripts/flowctl.py` -- `cmd_memory_migrate`; grep `def cmd_memory_migrate`. <!-- Updated by plan-sync: line numbers stale post-T2 -->
 - `plugins/flow-next/scripts/flowctl.py:50` -- `SCHEMA_VERSION = 3` (T1 landed; T3 verifies and reads).
-- `plugins/flow-next/scripts/flowctl.py:4086` -- `meta = {"schema_version": SCHEMA_VERSION, "next_spec": 1}` (T1 already writes `next_spec` for fresh inits; T3 migrates existing 0.x meta files that still have `next_epic`). <!-- Updated by plan-sync: line numbers shifted post-T1 -->
-- `plugins/flow-next/scripts/flowctl.py:3692-3768` -- `get_specs_json_write_dir` + `find_spec_json_path` + `iter_spec_json_files` helpers from T1 (read/write resolution rules).
+- `plugins/flow-next/scripts/flowctl.py:4142` -- `meta = {"schema_version": SCHEMA_VERSION, "next_spec": 1}` (T1 already writes `next_spec` for fresh inits; T3 migrates existing 0.x meta files that still have `next_epic`). <!-- Updated by plan-sync: line numbers shifted post-T2; grep `meta = {"schema_version"` for the canonical site -->
+- `plugins/flow-next/scripts/flowctl.py:3718-3825` -- `get_specs_json_write_dir` + `find_spec_json_path` + `iter_spec_json_files` helpers from T1; T2 added `_emit_rename_deprecation` + `iter_spec_json_files` in this block (read/write resolution rules). <!-- Updated by plan-sync: line range shifted post-T2 helper additions -->
 
 ## Key context
 

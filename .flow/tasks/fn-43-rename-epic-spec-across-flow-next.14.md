@@ -33,7 +33,7 @@ Rewire all smoke tests to assert the new `flowctl spec *` surface. Add a separat
   5. Top-level `flowctl show fn-X` (NOT renamed; no `flowctl spec show` introduced) resolves both spec and task ids identically pre- and post-rename.
   6. `EPICS_FILE=...` env var on `flowctl next` works AND emits stderr deprecation; `SPECS_FILE=...` is silent.
   7. `flowctl next --json` blocked-task output contains BOTH `reason: "blocked_by_spec_deps"` AND `legacy_reason: "blocked_by_epic_deps"`.
-  Each assertion: stderr contains the deprecation marker; stdout JSON matches canonical exactly.
+  Each assertion: stderr contains the deprecation marker; stdout JSON matches canonical exactly. <!-- Updated by plan-sync: T2 ships `_emit_rename_deprecation` as one-shot per process per legacy form (set-keyed `_RENAME_DEPRECATION_EMITTED`); each assertion runs in its own subshell to guarantee a fresh emission. -->
 - New `migration_smoke.sh` covers:
   1. Pre-1.0 fixture (`.flow/epics/fn-X.json`, no sentinel) -> `flowctl migrate-rename --dry-run` prints plan, no mutation.
   2. Same fixture -> `flowctl migrate-rename --yes` migrates; sentinel + backup `.complete` marker + `.flow/.migration-manifest` (top-level) present.
