@@ -13704,12 +13704,26 @@ def _migrate_release_lock(lock_dir: Path) -> None:
 def _migrate_pid_alive(pid: int) -> bool:
     """Cross-platform check whether a PID still exists.
 
-    POSIX: `os.kill(pid, 0)` raises ProcessLookupError if the process is gone.
-    Windows: Python's os.kill with 0 also works on Windows 3.x+ for liveness.
-    Treat any unexpected exception as "alive" (safer to wait than reclaim).
+    POSIX: `os.kill(pid, 0)` is the standard liveness probe — sends no signal,
+    raises ProcessLookupError when the PID is gone, PermissionError when the
+    PID exists but is owned by another user.
+
+    Windows: `os.kill(pid, 0)` is NOT a no-op — it maps to TerminateProcess
+    on the target via OpenProcess(CTRL_C_EVENT) semantics, which can actually
+    *kill* a peer migrate-rename process. Use OpenProcess + GetExitCodeProcess
+    via ctypes instead. STILL_ACTIVE (0x103) means alive; any other exit code
+    means the process has terminated.
+
+    Returns False for any pid we can't probe — conservative for stale-lock
+    reclaim (a "dead" verdict reclaims the lock; falsely-dead would race a
+    living peer, but on POSIX `os.kill(pid, 0)` is reliable, and on Windows
+    we use the Win32 query API which only returns False on confirmed exit).
     """
     if pid <= 0:
         return False
+    if sys.platform == "win32":
+        return _migrate_pid_alive_windows(pid)
+    # POSIX
     try:
         os.kill(pid, 0)
         return True
@@ -13719,8 +13733,60 @@ def _migrate_pid_alive(pid: int) -> bool:
         # Process exists but we can't signal it — still alive.
         return True
     except OSError:
-        # Windows raises OSError(EINVAL) on bad pids; treat as dead.
+        # EINVAL etc — treat as dead (conservative for reclaim).
         return False
+
+
+def _migrate_pid_alive_windows(pid: int) -> bool:
+    """Windows-only PID liveness via OpenProcess + GetExitCodeProcess.
+
+    `os.kill(pid, 0)` on Windows is destructive — it can terminate the target
+    process. Win32's documented liveness probe is `OpenProcess(SYNCHRONIZE |
+    PROCESS_QUERY_LIMITED_INFORMATION, ...)` followed by `GetExitCodeProcess`
+    and a check for `STILL_ACTIVE` (0x103). We use ctypes to avoid a hard
+    dependency on `pywin32`.
+
+    Returns:
+      True  — process exists and is running
+      False — process is gone, or we can't tell (treat as dead for reclaim)
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except ImportError:
+        # Should never happen on Windows, but guard anyway.
+        return True  # Pessimistic: don't reclaim if we can't query.
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    SYNCHRONIZE = 0x00100000
+    STILL_ACTIVE = 259  # STATUS_PENDING
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    OpenProcess = kernel32.OpenProcess
+    OpenProcess.restype = wintypes.HANDLE
+    OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    GetExitCodeProcess = kernel32.GetExitCodeProcess
+    GetExitCodeProcess.restype = wintypes.BOOL
+    GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    CloseHandle = kernel32.CloseHandle
+    CloseHandle.argtypes = [wintypes.HANDLE]
+
+    handle = OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid
+    )
+    if not handle:
+        # OpenProcess failed: process is gone OR we lack the privilege.
+        # Conservative for reclaim: treat as dead so a stale lock from a
+        # crashed peer is recoverable. (A live peer we can't query is
+        # unusual; it would block forever otherwise.)
+        return False
+    try:
+        exit_code = wintypes.DWORD()
+        if not GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return False
+        return exit_code.value == STILL_ACTIVE
+    finally:
+        CloseHandle(handle)
 
 
 def _monotonic_now() -> float:
@@ -13820,6 +13886,23 @@ def _migrate_handle_crash_recovery(
     Returns a list of human-readable recovery actions performed (empty when
     no recovery was needed). Caller plans/applies these alongside the main
     migration plan.
+
+    Decision tree (sentinel absent — caller already short-circuited the
+    "already migrated" case):
+
+      no backup             -> nothing to recover; fall through to fresh migrate.
+      backup w/o .complete  -> mid-COPY crash; wipe partial backup, retry from step 4.
+      backup w/ .complete + manifest absent -> CLEAN ROLLBACK aftermath. The user
+        explicitly ran `flowctl migrate-rollback`, which restores layout AND
+        deletes the manifest, BUT preserves the backup for repeatable rollback.
+        Treat this exactly like "no backup" — leave the (now-orphaned-from-the-
+        current-run perspective) backup intact and start a fresh migration. This
+        prevents the "rollback then edit then re-migrate silently restores the
+        old backup over my edits" footgun.
+      backup w/ .complete + manifest present -> mid-MIGRATION crash. Manifest
+        was written between backup completion and sentinel write but we never
+        finished. Restore by COPY (so backup stays intact) then retry from
+        step 4. Discard the now-stale backup so step 4 produces a fresh snapshot.
     """
     sentinel = flow_dir / FLOW_VERSION_SENTINEL
     actions: list[str] = []
@@ -13840,8 +13923,20 @@ def _migrate_handle_crash_recovery(
             actions.append(f"discarded partial backup at {backup_dir}")
         return actions
 
-    # Backup is complete but no sentinel: mid-migration crash. Restore by copy
-    # so step 4 can produce a fresh backup snapshot.
+    # Backup is complete; manifest decides "clean rollback" vs "mid-migration crash".
+    manifest_path = flow_dir / MIGRATE_MANIFEST_FILE
+    if not manifest_path.exists():
+        # Clean rollback aftermath. Leave backup alone; it stays available for
+        # a repeatable rollback if the user re-migrates and wants to roll back
+        # again. Don't restore over the current state — that would clobber
+        # legitimate edits made since the rollback.
+        actions.append(
+            f"detected clean rollback aftermath (backup intact, manifest absent); "
+            f"preserving {backup_dir} and starting fresh migration"
+        )
+        return actions
+
+    # Mid-migration crash: manifest exists, sentinel doesn't. Restore + retry.
     if dry_run:
         actions.append(f"would restore from {backup_dir} and discard it before re-migrating")
         return actions
@@ -14112,55 +14207,30 @@ def cmd_migrate_rename(args: argparse.Namespace) -> None:
         )
 
         if not _migrate_pre_1_0_layout_present(flow_dir):
-            # No epics/ dir AND no sentinel — fresh 1.0 init missing the
-            # sentinel file. Safe to write the sentinel + bump meta and exit.
-            plan = _migrate_collect_plan(flow_dir)
-            description = _migrate_describe_plan(plan)
-            description.append(f"write {FLOW_VERSION_SENTINEL} = {FLOW_VERSION_PAYLOAD}")
-            if dry_run:
-                if is_json:
-                    json_output({
-                        "migrated": False,
-                        "dry_run": True,
-                        "would_apply": True,
-                        "plan": description,
-                        "recovery": recovery_actions,
-                    })
-                else:
-                    print("Pre-1.0 layout not detected (no .flow/epics/). Will only write the sentinel + bump schema:")
-                    for line in description:
-                        print(f"  - {line}")
-                    print("\nRe-run with --yes to apply.")
-                return
-
-            # Apply the (possibly empty) plan + write sentinel.
-            entries, meta_summary = _migrate_apply_plan(flow_dir, plan)
-            manifest_path = flow_dir / MIGRATE_MANIFEST_FILE
-            manifest = {
-                "version": 1,
-                "started_at": now_iso(),
-                "schema_version_to": SCHEMA_VERSION,
-                "entries": entries,
-                "meta_summary": meta_summary,
-            }
-            atomic_write_json(manifest_path, manifest)
-            (flow_dir / FLOW_VERSION_SENTINEL).write_text(
-                FLOW_VERSION_PAYLOAD + "\n", encoding="utf-8"
-            )
+            # No epics/ dir AND no sentinel — neither pre-1.0 nor migrated.
+            # Per fn-43.3 spec step 3: "If neither, exit 0." This is a true
+            # no-op — refuse to mutate state when nothing identifies the
+            # current layout as needing migration. Writing the sentinel +
+            # manifest here would leave the repo in an unrecoverable shape
+            # (manifest without a backup means rollback can't undo it).
+            #
+            # The spec separately handles the "fresh 1.0 init wants the
+            # sentinel" case by writing the sentinel at `flowctl init` time
+            # (T1 wires that). Auto-stamping at migrate-rename time risks
+            # getting it wrong on a half-formed repo.
             if is_json:
                 json_output({
-                    "migrated": True,
-                    "dry_run": False,
-                    "plan": description,
-                    "entries": entries,
+                    "migrated": False,
+                    "dry_run": dry_run,
+                    "reason": "no pre-1.0 layout detected and no sentinel; nothing to do",
                     "recovery": recovery_actions,
-                    "manifest_path": str(manifest_path),
-                    "sentinel_path": str(flow_dir / FLOW_VERSION_SENTINEL),
                 })
             else:
-                print("Migration applied (no pre-1.0 layout — sentinel + schema bump only):")
-                for line in description:
-                    print(f"  - {line}")
+                if recovery_actions:
+                    print("Recovery actions:")
+                    for action in recovery_actions:
+                        print(f"  - {action}")
+                print("No pre-1.0 layout detected (no .flow/epics/) and no sentinel; nothing to do.")
             return
 
         # Pre-1.0 layout confirmed. Plan + apply the full migration.
@@ -14205,15 +14275,15 @@ def cmd_migrate_rename(args: argparse.Namespace) -> None:
 
         # 4. Backup. Write `.complete` only after the copy finishes.
         if backup_dir.exists():
-            # Crash-recovery already discarded partial backups; any leftover here
-            # is a complete-but-orphaned snapshot. Safest path: refuse rather than
-            # silently overwrite a backup that may belong to a different lineage.
-            error_exit(
-                f"migrate-rename: stale backup at {backup_dir}. Run `flowctl migrate-rollback --yes` "
-                "to restore from it, or remove it manually before retrying.",
-                use_json=is_json,
-                code=1,
-            )
+            # Crash-recovery already handled three cases (partial backup wiped,
+            # mid-migration crash restored + wiped, clean-rollback aftermath
+            # preserved). The only remaining "backup_dir exists here" case is
+            # the clean-rollback aftermath: backup intact, manifest absent.
+            # Replace it with a fresh snapshot so the new migration's rollback
+            # target reflects current state, not the pre-1.0 state from a
+            # previous lineage. This is safe because the user explicitly
+            # rolled back (acknowledging the old backup's purpose was served).
+            shutil.rmtree(backup_dir)
         _migrate_copy_tree_to_backup(flow_dir, backup_dir)
         (backup_dir / MIGRATE_BACKUP_COMPLETE_MARKER).write_text(
             now_iso() + "\n", encoding="utf-8"
@@ -14277,9 +14347,15 @@ def _rollback_post_migration_writes(
 ) -> list[str]:
     """Detect post-migration writes by diffing actual files vs. manifest entries.
 
-    A post-migration write is any `.flow/specs/*.json` (or task JSON) that exists
-    on disk but is NOT recorded in the manifest. Returns the list of unexpected
-    paths (relative to flow_dir).
+    A post-migration write is any spec or task artefact (JSON metadata OR the
+    paired Markdown file) that exists on disk but does not trace back to the
+    pre-migration state. The check covers both the JSON sidecar AND the
+    paired Markdown — `flowctl spec create` writes both, so a rollback that
+    only removed JSON would leave orphan `.md` files that skew future ID
+    allocation (`scan_max_spec_id` walks both `.json` and `.md`).
+
+    A file is "expected" iff it traces back to the pre-1.0 state (existed in
+    the backup) OR the migration moved/rewrote it (recorded in the manifest).
     """
     expected_specs: set[str] = set()
     expected_tasks: set[str] = set()
@@ -14295,6 +14371,9 @@ def _rollback_post_migration_writes(
                 expected_tasks.add(path)
 
     unexpected: list[str] = []
+    backup = flow_dir / MIGRATE_BACKUP_DIR
+
+    # Spec JSON: unexpected if not in manifest (post-migration creation).
     specs_dir = flow_dir / SPECS_DIR
     if specs_dir.exists():
         for spec_file in sorted(specs_dir.glob("fn-*.json")):
@@ -14302,16 +14381,34 @@ def _rollback_post_migration_writes(
             if rel not in expected_specs:
                 unexpected.append(rel)
 
+    # Spec Markdown: unexpected if not present in backup's specs/ AND not
+    # present in backup's epics/ (pre-1.0 markdown ALWAYS lives at specs/<id>.md
+    # but be defensive). A spec.md created post-migration via `flowctl spec
+    # create` has no backup counterpart.
+    if specs_dir.exists():
+        backup_specs_md = backup / SPECS_DIR
+        backup_epics_md = backup / EPICS_DIR
+        for md_file in sorted(specs_dir.glob("fn-*.md")):
+            rel = str(md_file.relative_to(flow_dir))
+            backup_md_at_specs = backup_specs_md / md_file.name
+            backup_md_at_epics = backup_epics_md / md_file.name
+            if not backup_md_at_specs.exists() and not backup_md_at_epics.exists():
+                unexpected.append(rel)
+
+    # Tasks: unexpected if no backup counterpart AND not in manifest rewrites.
     tasks_dir = flow_dir / TASKS_DIR
     if tasks_dir.exists():
+        backup_tasks = backup / TASKS_DIR
         for task_file in sorted(tasks_dir.glob("fn-*.json")):
             rel = str(task_file.relative_to(flow_dir))
-            # Tasks might exist with NO rewrite (already canonical pre-migration),
-            # so the manifest's task list isn't an exhaustive whitelist. Instead,
-            # check existence in backup. If a task was added after migration
-            # (no backup counterpart, no manifest rewrite entry), flag it.
-            backup_task = flow_dir / MIGRATE_BACKUP_DIR / TASKS_DIR / task_file.name
+            backup_task = backup_tasks / task_file.name
             if not backup_task.exists() and rel not in expected_tasks:
+                unexpected.append(rel)
+        # Markdown task specs: same shape as spec markdown.
+        for md_file in sorted(tasks_dir.glob("fn-*.md")):
+            rel = str(md_file.relative_to(flow_dir))
+            backup_md = backup_tasks / md_file.name
+            if not backup_md.exists():
                 unexpected.append(rel)
 
     return unexpected
