@@ -14076,7 +14076,10 @@ def _migrate_apply_plan(
         })
         meta_summary = {"prev": meta_before, "next": dict(meta)}
 
-    # Step 9: rewrite task JSON to canonical spec key.
+    # Step 9: rewrite task JSON to canonical spec key. Record the SHA256 of
+    # the post-migration content so rollback can detect drift (a user editing
+    # a rewritten task post-migration would otherwise slip past the manifest
+    # check; see fn-43.3 codex review F7).
     for task_file in plan["task_rewrites"]:
         task_data = load_json(task_file)
         before_keys = sorted(k for k in ("epic", "epic_id", "spec", "spec_id") if k in task_data)
@@ -14088,6 +14091,7 @@ def _migrate_apply_plan(
             "path": str(task_file.relative_to(flow_dir)),
             "prev_keys": before_keys,
             "next_keys": after_keys,
+            "post_sha256": _migrate_file_sha256(task_file),
         })
 
     # Step 10: remove now-empty .flow/epics/ directory.
@@ -14396,6 +14400,10 @@ def _rollback_post_migration_writes(
     """
     expected_specs: set[str] = set()
     expected_tasks: set[str] = set()
+    # path -> post-migration SHA256 (when recorded). Empty string means the
+    # manifest didn't record one (transient I/O at write time, or a legacy
+    # manifest that pre-dates the F7 fix); skip drift check in that case.
+    rewritten_task_hashes: dict[str, str] = {}
     for entry in manifest.get("entries", []):
         action = entry.get("action")
         if action == "move_spec_json":
@@ -14406,6 +14414,9 @@ def _rollback_post_migration_writes(
             path = entry.get("path")
             if isinstance(path, str):
                 expected_tasks.add(path)
+                post_hash = entry.get("post_sha256")
+                if isinstance(post_hash, str) and post_hash:
+                    rewritten_task_hashes[path] = post_hash
 
     unexpected: list[str] = []
     backup = flow_dir / MIGRATE_BACKUP_DIR
@@ -14475,12 +14486,24 @@ def _rollback_post_migration_writes(
                 if rel not in expected_tasks:
                     unexpected.append(rel)
                 continue
-            # Backup exists. Skip the content check when the manifest recorded a
-            # canonicalize_task_for_write rewrite — that's the migration's own
-            # touch (epic -> spec key rename), not a user write. For tasks NOT
-            # in the rewrite list, content drift means a user wrote to it.
+            # Backup exists. For tasks rewritten by the migration, compare
+            # against the recorded post-migration hash so a post-migration user
+            # edit (which differs from BOTH the backup AND the post-migration
+            # form) is flagged. Without this hash check the rewrite-listed
+            # tasks would silently pass and rollback would clobber the user's
+            # post-migration edits (fn-43.3 codex review F7).
             if rel in expected_tasks:
+                expected_hash = rewritten_task_hashes.get(rel)
+                if expected_hash:
+                    current_hash = _migrate_file_sha256(task_file)
+                    if current_hash and current_hash != expected_hash:
+                        unexpected.append(rel)
+                # No recorded hash: legacy manifest or read error at write
+                # time — fall back to "skip" (the migration touched it; we
+                # have no anchor to detect further drift).
                 continue
+            # Not in expected_tasks (didn't have epic/epic_id pre-migration);
+            # any drift from backup means a user write.
             if not _migrate_files_equal(task_file, backup_task):
                 unexpected.append(rel)
         # Markdown task specs: created or mutated post-migration.
@@ -14509,6 +14532,31 @@ def _migrate_files_equal(a: Path, b: Path) -> bool:
         return filecmp.cmp(str(a), str(b), shallow=False)
     except OSError:
         return False
+
+
+def _migrate_file_sha256(path: Path) -> str:
+    """Return the SHA-256 hex digest of `path`'s contents.
+
+    Used to record post-migration content hashes in the manifest so rollback
+    can detect drift on tasks the migration itself rewrote (where simple
+    backup-vs-current comparison wouldn't help — the migration changed the
+    content, and a user edit on top would be invisible without a hash).
+
+    Returns an empty string on read errors so the manifest write doesn't
+    crash on a transient I/O issue; rollback treats empty hash as "skip
+    drift check for this entry" (best-effort; surfaces explicitly if drift
+    later matters).
+    """
+    import hashlib
+
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(64 * 1024), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return ""
 
 
 def _rollback_apply(
