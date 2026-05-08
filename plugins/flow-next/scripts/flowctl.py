@@ -13634,11 +13634,45 @@ def cmd_migrate_state(args: argparse.Namespace) -> None:
 
 
 def _migrate_pre_1_0_layout_present(flow_dir: Path) -> bool:
-    """True iff .flow/ looks like a pre-1.0 repo (has .flow/epics/, no sentinel)."""
-    sentinel = flow_dir / FLOW_VERSION_SENTINEL
-    if sentinel.exists():
+    """True iff .flow/ looks like a pre-1.0 repo (has .flow/epics/, no valid sentinel)."""
+    valid, _ = _migrate_sentinel_state(flow_dir)
+    if valid:
         return False
     return (flow_dir / EPICS_DIR).exists()
+
+
+def _migrate_sentinel_state(flow_dir: Path) -> tuple[bool, Optional[str]]:
+    """Return (valid, payload) for the .flow_version sentinel.
+
+    A sentinel is valid iff the file exists AND its content matches a
+    recognized payload (currently `FLOW_VERSION_PAYLOAD = "1.0.0"`). An
+    empty / partial / unknown-payload file means a crashed migration that
+    failed mid-sentinel-write — the caller treats it as "not migrated"
+    and re-enters crash recovery rather than declaring the no-op
+    idempotent path.
+
+    The boolean form is preserved so existing call sites that just probe
+    `if _migrate_sentinel_valid(flow_dir):` continue to work; the optional
+    payload tuple is for callers that want to display the version.
+    """
+    sentinel = flow_dir / FLOW_VERSION_SENTINEL
+    if not sentinel.exists():
+        return (False, None)
+    try:
+        payload = sentinel.read_text(encoding="utf-8").strip()
+    except OSError:
+        return (False, None)
+    if payload == FLOW_VERSION_PAYLOAD:
+        return (True, payload)
+    # Unknown-but-non-empty payload: future flow-next versions may extend
+    # the layout (e.g. 1.1.0). Recognize semver-shaped payloads as valid
+    # for forward compatibility — if a 1.1+ flow-next ran here, downgrading
+    # back to 1.0 isn't our job; treat the layout as "already migrated past
+    # the 1.0 contract" and skip. An empty / garbage payload still falls
+    # through to invalid.
+    if re.match(r"^\d+\.\d+\.\d+$", payload):
+        return (True, payload)
+    return (False, payload)
 
 
 def _migrate_acquire_lock(flow_dir: Path, *, use_json: bool) -> Path:
@@ -14206,7 +14240,6 @@ def cmd_migrate_rename(args: argparse.Namespace) -> None:
         )
 
     flow_dir = get_flow_dir()
-    sentinel = flow_dir / FLOW_VERSION_SENTINEL
 
     # Fast-path idempotency check (advisory). Fires for BOTH dry-run and
     # --yes — an already-migrated repo is a no-op regardless of mode, and
@@ -14215,16 +14248,22 @@ def cmd_migrate_rename(args: argparse.Namespace) -> None:
     # build, frozen worktree) doesn't fail the "re-running --yes on a 1.0
     # repo is a no-op" acceptance criterion. The authoritative check still
     # runs post-lock to close the TOCTOU between two parallel --yes peers.
-    if sentinel.exists():
+    #
+    # Validate the sentinel PAYLOAD (not just existence). A crashed
+    # `write_text` could leave an empty/partial sentinel; treating that as
+    # "already migrated" would skip the recovery path. _migrate_sentinel_state
+    # rejects empty / unparseable payloads and falls through to crash recovery.
+    valid_sentinel, payload = _migrate_sentinel_state(flow_dir)
+    if valid_sentinel:
         if is_json:
             json_output({
                 "migrated": False,
                 "reason": "already migrated",
-                "flow_version": sentinel.read_text(encoding="utf-8").strip(),
+                "flow_version": payload,
                 "dry_run": dry_run,
             })
         else:
-            print(f".flow/ already on layout {sentinel.read_text(encoding='utf-8').strip()}; nothing to do.")
+            print(f".flow/ already on layout {payload}; nothing to do.")
         return
 
     # Read-only filesystem refusal: an explicit `--yes` against a read-only
@@ -14250,17 +14289,19 @@ def cmd_migrate_rename(args: argparse.Namespace) -> None:
         # Authoritative idempotency check, post-lock. A peer migrate-rename
         # may have completed while we waited; respect their work and exit
         # cleanly with the same shape as the fast-path check above.
-        if sentinel.exists():
-            payload = sentinel.read_text(encoding="utf-8").strip()
+        # Re-validate via _migrate_sentinel_state so a crashed peer's empty
+        # sentinel doesn't trick us into the no-op branch.
+        valid_post, payload_post = _migrate_sentinel_state(flow_dir)
+        if valid_post:
             if is_json:
                 json_output({
                     "migrated": False,
                     "reason": "already migrated",
-                    "flow_version": payload,
+                    "flow_version": payload_post,
                     "dry_run": dry_run,
                 })
             else:
-                print(f".flow/ already on layout {payload}; nothing to do.")
+                print(f".flow/ already on layout {payload_post}; nothing to do.")
             return
 
         # 3. Pre-1.0 layout check + crash recovery.
@@ -14377,9 +14418,14 @@ def cmd_migrate_rename(args: argparse.Namespace) -> None:
             "meta_summary": meta_summary,
         })
 
-        # 11. Sentinel — written LAST. Plain text, payload is FLOW_VERSION_PAYLOAD.
-        (flow_dir / FLOW_VERSION_SENTINEL).write_text(
-            FLOW_VERSION_PAYLOAD + "\n", encoding="utf-8"
+        # 11. Sentinel — written LAST via atomic_write so a crash mid-write
+        # never leaves a partial sentinel that the next run mistakes for
+        # "already migrated". atomic_write writes to a tempfile then
+        # os.replace's into place — either the full content lands or
+        # nothing does.
+        atomic_write(
+            flow_dir / FLOW_VERSION_SENTINEL,
+            FLOW_VERSION_PAYLOAD + "\n",
         )
 
         if is_json:
