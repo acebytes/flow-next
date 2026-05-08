@@ -12973,14 +12973,29 @@ def cmd_next(args: argparse.Namespace) -> None:
     flow_dir = get_flow_dir()
 
     # Resolve specs list. T2 layers a one-shot stderr deprecation when only
-    # the legacy --epics-file flag is set; --specs-file (canonical) is silent.
-    # The skill tooling has historically passed --epics-file; both flags route
-    # here and the canonical wins when both are passed.
+    # the legacy --epics-file flag (or EPICS_FILE env var) is set; canonical
+    # --specs-file / SPECS_FILE is silent. Skill tooling has historically
+    # passed --epics-file; both flags route here. CLI flag wins over env var;
+    # canonical wins over legacy in each tier.
     canonical_specs_file = getattr(args, "specs_file", None)
     legacy_specs_file = getattr(args, "epics_file", None)
-    specs_file = canonical_specs_file or legacy_specs_file
+    canonical_specs_env = os.environ.get("SPECS_FILE")
+    legacy_specs_env = os.environ.get("EPICS_FILE")
+    specs_file = (
+        canonical_specs_file
+        or legacy_specs_file
+        or canonical_specs_env
+        or legacy_specs_env
+    )
     if not canonical_specs_file and legacy_specs_file:
         _emit_rename_deprecation("--epics-file", "--specs-file")
+    elif (
+        not canonical_specs_file
+        and not legacy_specs_file
+        and not canonical_specs_env
+        and legacy_specs_env
+    ):
+        _emit_rename_deprecation("EPICS_FILE", "SPECS_FILE")
     epic_ids: list[str] = []
     if specs_file:
         data = load_json_or_exit(
