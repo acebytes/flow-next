@@ -193,16 +193,16 @@ $FLOWCTL show <epic-id> --json | jq -r '.completion_review_status'
 
 **If review needed:**
 
-1. Invoke `/flow-next:epic-review <epic-id>` skill
+1. Invoke `/flow-next:spec-completion-review <spec-id>` skill
    - Pass `--review=<backend>` matching the work review backend
    - Skill handles rp/codex backend dispatch
    - Skill runs fix loop internally until SHIP verdict
 
 2. After skill returns with SHIP:
-   - Set status: `$FLOWCTL epic set-completion-review-status <epic-id> --status ship --json`
+   - Set status: `$FLOWCTL epic set-completion-review-status <spec-id> --status ship --json`
    - Go to Phase 4 (Quality)
 
-**Note:** The epic-review skill gets SHIP from the reviewer but does NOT set the status itself. The caller (work skill or Ralph) sets `completion_review_status=ship` after successful review.
+**Note:** The spec-completion-review skill gets SHIP from the reviewer but does NOT set the status itself. The caller (work skill or Ralph) sets `completion_review_status=ship` after successful review.
 
 **Fix loop behavior**: Same as impl-review. If reviewer returns NEEDS_WORK:
 1. Skill parses issues
@@ -277,7 +277,7 @@ Phase 1 (resolve) → Phase 2 (branch) → Phase 3:
   ├─ 3e: plan-sync (if enabled + downstream tasks exist)
   ├─ 3f: EPIC_MODE? → loop to 3a | SINGLE_TASK_MODE? → Phase 4
   ├─ no more tasks → 3g: check completion_review_status
-  │   ├─ status != ship → invoke /flow-next:epic-review → fix loop until SHIP → set status=ship
+  │   ├─ status != ship → invoke /flow-next:spec-completion-review → fix loop until SHIP → set status=ship
   │   └─ status = ship → Phase 4
   └─ Phase 4 (quality) → Phase 5 (ship)
 ```

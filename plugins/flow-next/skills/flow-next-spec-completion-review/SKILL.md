@@ -1,16 +1,16 @@
 ---
-name: flow-next-epic-review
-description: Epic completion review - verifies all epic tasks implement spec requirements. Triggers on /flow-next:epic-review.
+name: flow-next-spec-completion-review
+description: Spec completion review - verifies all spec tasks implement the spec requirements. Triggers on /flow-next:spec-completion-review.
 user-invocable: false
 ---
 
-# Epic Completion Review Mode
+# Spec Completion Review Mode
 
 **Read [workflow.md](workflow.md) for detailed phases and anti-patterns.**
 
-Verify that the combined implementation of all epic tasks satisfies the spec requirements. This is NOT a code quality review (that's impl-review's job) — this confirms spec compliance only.
+Verify that the combined implementation of all tasks in a spec satisfies the spec requirements. This is NOT a code quality review (that's impl-review's job) — this confirms spec compliance only.
 
-**Role**: Epic Review Coordinator (NOT the reviewer)
+**Role**: Spec Completion Review Coordinator (NOT the reviewer)
 **Backends**: RepoPrompt (rp), Codex CLI (codex), or GitHub Copilot CLI (copilot)
 
 **CRITICAL: flowctl is BUNDLED — NOT installed globally.** `which flowctl` will fail (expected). Always use:
@@ -56,7 +56,7 @@ echo "Review backend: $BACKEND (override: --review=rp|codex|copilot|none)"
 - **codex** — Codex CLI (cross-platform); uses OpenAI models (default `gpt-5.5`). `FLOW_CODEX_MODEL` / `FLOW_CODEX_EFFORT` env vars, or `--spec codex:gpt-5.4:xhigh`.
 - **copilot** — GitHub Copilot CLI (cross-platform); supports Claude Opus/Sonnet/Haiku 4.5 and GPT-5.2 families via a Copilot subscription. `FLOW_COPILOT_MODEL` / `FLOW_COPILOT_EFFORT` env vars, or `--spec copilot:claude-opus-4.5:xhigh`.
 
-**Spec grammar:** `backend[:model[:effort]]` — `FLOW_REVIEW_BACKEND` and `.flow/config.json review.backend` both accept this. Examples: `codex`, `codex:gpt-5.2`, `copilot:claude-opus-4.5:xhigh`. Per-epic `default_review` (set via `flowctl epic set-backend`) overrides env.
+**Spec grammar:** `backend[:model[:effort]]` — `FLOW_REVIEW_BACKEND` and `.flow/config.json review.backend` both accept this. Examples: `codex`, `codex:gpt-5.2`, `copilot:claude-opus-4.5:xhigh`. Per-spec `default_review` (set via `flowctl epic set-backend`) overrides env.
 
 ## Critical Rules
 
@@ -75,7 +75,7 @@ echo "Review backend: $BACKEND (override: --review=rp|codex|copilot|none)"
 **For copilot backend:**
 1. Use `$FLOWCTL copilot completion-review` exclusively
 2. Pass `--receipt` for session continuity on re-reviews (session only resumes when prior receipt has `mode == "copilot"`)
-3. Model + effort resolved via (first match wins): `--spec backend:model:effort` flag, per-epic `default_review`, `FLOW_REVIEW_BACKEND` spec, `FLOW_COPILOT_MODEL` / `FLOW_COPILOT_EFFORT` env vars, registry defaults
+3. Model + effort resolved via (first match wins): `--spec backend:model:effort` flag, per-spec `default_review`, `FLOW_REVIEW_BACKEND` spec, `FLOW_COPILOT_MODEL` / `FLOW_COPILOT_EFFORT` env vars, registry defaults
 4. Parse verdict from command output
 
 **For all backends:**
@@ -90,9 +90,9 @@ echo "Review backend: $BACKEND (override: --review=rp|codex|copilot|none)"
 ## Input
 
 Arguments: $ARGUMENTS
-Format: `<epic-id> [--review=rp|codex|copilot|none]`
+Format: `<spec-id> [--review=rp|codex|copilot|none]`
 
-- Epic ID - Required, e.g. `fn-1` or `fn-22-53k`
+- Spec ID - Required, e.g. `fn-1` or `fn-22-53k`
 - `--review` - Optional backend override
 
 ## Workflow
@@ -107,7 +107,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 ### Step 0: Parse Arguments
 
 Parse $ARGUMENTS for:
-- First positional arg matching `fn-*` → `EPIC_ID`
+- First positional arg matching `fn-*` → `SPEC_ID`
 - `--review=<backend>` → backend override
 - Remaining args → focus areas
 
@@ -120,7 +120,7 @@ Run backend detection from SKILL.md above. Then branch:
 ```bash
 RECEIPT_PATH="${REVIEW_RECEIPT_PATH:-/tmp/completion-review-receipt.json}"
 
-$FLOWCTL codex completion-review "$EPIC_ID" --receipt "$RECEIPT_PATH"
+$FLOWCTL codex completion-review "$SPEC_ID" --receipt "$RECEIPT_PATH"
 # Output includes VERDICT=SHIP|NEEDS_WORK
 ```
 
@@ -136,7 +136,7 @@ RECEIPT_PATH="${REVIEW_RECEIPT_PATH:-/tmp/completion-review-receipt.json}"
 #   FLOW_REVIEW_BACKEND=copilot:claude-opus-4.5:xhigh
 #   FLOW_COPILOT_MODEL=gpt-5.2 FLOW_COPILOT_EFFORT=high
 
-$FLOWCTL copilot completion-review "$EPIC_ID" --receipt "$RECEIPT_PATH"
+$FLOWCTL copilot completion-review "$SPEC_ID" --receipt "$RECEIPT_PATH"
 # Output includes VERDICT=SHIP|NEEDS_WORK
 ```
 
@@ -149,7 +149,7 @@ On NEEDS_WORK: fix code, commit, re-run. Session resume only when prior receipt 
 Go to the "RepoPrompt Backend Workflow" section in workflow.md and execute those steps. Do not proceed here until workflow.md phases are complete.
 
 The workflow covers:
-1. Gather context (epic spec, tasks, changed files)
+1. Gather context (spec, tasks, changed files)
 2. Atomic setup (setup-review) → sets `$W` and `$T`
 3. Augment selection and build review prompt
 4. Send review and parse verdict

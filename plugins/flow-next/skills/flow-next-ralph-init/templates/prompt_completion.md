@@ -30,14 +30,14 @@ Ralph mode rules (must follow):
 - If any rule is violated, output `<promise>RETRY</promise>` and stop.
 
 3) Completion review gate (branch on bare backend; full spec is already in env):
-   - If COMPLETION_REVIEW_BACKEND=rp: run `/flow-next:epic-review {{EPIC_ID}} --review=rp`
-   - If COMPLETION_REVIEW_BACKEND=codex: run `/flow-next:epic-review {{EPIC_ID}} --review=codex`
-   - If COMPLETION_REVIEW_BACKEND=copilot: run `/flow-next:epic-review {{EPIC_ID}} --review=copilot`
+   - If COMPLETION_REVIEW_BACKEND=rp: run `/flow-next:spec-completion-review {{EPIC_ID}} --review=rp`
+   - If COMPLETION_REVIEW_BACKEND=codex: run `/flow-next:spec-completion-review {{EPIC_ID}} --review=codex`
+   - If COMPLETION_REVIEW_BACKEND=copilot: run `/flow-next:spec-completion-review {{EPIC_ID}} --review=copilot`
    - If COMPLETION_REVIEW_BACKEND=none: set ship and stop:
      `scripts/ralph/flowctl epic set-completion-review-status {{EPIC_ID}} --status ship --json`
 
    Note: when COMPLETION_REVIEW is spec form (e.g. `codex:gpt-5.4:xhigh`), the
-   /flow-next:epic-review skill picks up the spec from `FLOW_REVIEW_BACKEND`
+   /flow-next:spec-completion-review skill picks up the spec from `FLOW_REVIEW_BACKEND`
    automatically — no extra flag needed.
 
 4) The skill will loop internally until `<verdict>SHIP</verdict>`:

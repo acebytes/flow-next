@@ -345,7 +345,7 @@ RP_WARNING='
 ---
 '
 
-for skill in flow-next-impl-review flow-next-plan-review flow-next-epic-review; do
+for skill in flow-next-impl-review flow-next-plan-review flow-next-spec-completion-review; do
   wf="$CODEX_DIR/skills/$skill/workflow.md"
   if [ -f "$wf" ]; then
     { head -1 "$wf"; echo "$RP_WARNING"; tail -n +2 "$wf"; } > "${wf}.tmp"
@@ -538,7 +538,7 @@ generate_openai_yaml "flow-next-make-pr" "Flow Make PR" "Render a cognitive-aid 
 # Review skills (red, explicit)
 generate_openai_yaml "flow-next-impl-review" "Flow Implementation Review" "Carmack-level code review via RepoPrompt"  "#EF4444" false
 generate_openai_yaml "flow-next-plan-review" "Flow Plan Review"           "Carmack-level plan review via RepoPrompt"  "#EF4444" false
-generate_openai_yaml "flow-next-epic-review" "Flow Epic Review"           "Verify epic implementation matches spec"   "#EF4444" false
+generate_openai_yaml "flow-next-spec-completion-review" "Flow Spec Completion Review" "Verify spec implementation matches the spec" "#EF4444" false
 generate_openai_yaml "flow-next-resolve-pr"  "Flow Resolve PR"            "Resolve PR review feedback via GraphQL"    "#EF4444" false "Resolve PR "
 
 # Utility skills (blue/amber, implicit allowed)
@@ -562,7 +562,7 @@ REQUIRED_OPENAI_YAML_SKILLS=(
   "flow-next-make-pr"
   "flow-next-impl-review"
   "flow-next-plan-review"
-  "flow-next-epic-review"
+  "flow-next-spec-completion-review"
   "flow-next-resolve-pr"
   "flow-next"
   "flow-next-prime"
