@@ -35,16 +35,23 @@ Rewire all smoke tests to assert the new `flowctl spec *` surface. Add a separat
   7. `flowctl next --json` blocked-task output contains BOTH `reason: "blocked_by_spec_deps"` AND `legacy_reason: "blocked_by_epic_deps"`.
   Each assertion: stderr contains the deprecation marker; stdout JSON matches canonical exactly. <!-- Updated by plan-sync: T2 ships `_emit_rename_deprecation` as one-shot per process per legacy form (set-keyed `_RENAME_DEPRECATION_EMITTED`); each assertion runs in its own subshell to guarantee a fresh emission. -->
 - New `migration_smoke.sh` covers:
-  1. Pre-1.0 fixture (`.flow/epics/fn-X.json`, no sentinel) -> `flowctl migrate-rename --dry-run` prints plan, no mutation.
+  1. Pre-1.0 fixture (`.flow/epics/fn-X.json`, no sentinel) -> `flowctl migrate-rename --dry-run` prints plan, no mutation. <!-- Updated by plan-sync: T3 also writes `.flow/.banner-acknowledged` on --dry-run; assert the ack file lands and re-runs do not re-emit the banner -->
   2. Same fixture -> `flowctl migrate-rename --yes` migrates; sentinel + backup `.complete` marker + `.flow/.migration-manifest` (top-level) present.
   3. `.flow/.backup-pre-1.0/.migration-manifest` does NOT exist (manifest lives at top level, not inside backup).
   4. Idempotent re-run.
   5. `flowctl migrate-rollback --yes` restores pre-1.0 layout; `.flow/.backup-pre-1.0/` remains intact post-rollback.
   6. Post-migration spec creation -> `migrate-rollback --yes` FAILS with exit 1 + manifest-mismatch message.
   7. Post-migration spec creation -> `migrate-rollback --yes --force-overwrite-post-migration-changes` proceeds.
-  8. Concurrency: two parallel `migrate-rename --yes` invocations, second waits.
-  9. Crash recovery: kill process mid-mutation, restart -> detects partial state, recovers.
-  10. Read-only `.flow/`: `flowctl migrate-rename --yes` fails with exit code 1 + clear stderr message.
+  8. Concurrency: two parallel `migrate-rename --yes` invocations, second waits. <!-- Updated by plan-sync: T3 ships PID-liveness reclaim; add stale-lock test (write fake PID inside `.flow/.migrating/`, reclaim succeeds when PID is dead via `os.kill` POSIX / `OpenProcess` Windows) -->
+  9. Crash recovery — T3 ships a 4-case decision tree; smoke covers each case: <!-- Updated by plan-sync: T3 done summary enumerated 4 distinct cases; original spec said "kill mid-mutation" generically -->
+     - 9a. No backup at all (crashed before backup started) -> migrate restarts cleanly from step 4.
+     - 9b. Partial backup (no `.complete` marker) -> migrate detects + restarts the backup phase.
+     - 9c. Complete backup, no manifest (crashed between backup and step 6) -> migrate detects + reinitializes manifest, retries.
+     - 9d. Mid-migration crash (manifest populated, sentinel missing) -> migrate restores from backup by COPY (not move), retries.
+  10. Read-only `.flow/`: `flowctl migrate-rename --yes` on a 0.x repo fails with exit code 1 + clear stderr message; `flowctl migrate-rename --yes` on an ALREADY-migrated 1.0 repo (sentinel present) on read-only fs is a no-op (idempotency check runs BEFORE read-only refusal). <!-- Updated by plan-sync: T3 ships idempotency-before-readonly ordering -->
+  11. Atomic sentinel write — kill process during step 11 (sentinel write); restart finds either no sentinel (retries step 11) or fully written sentinel (idempotent skip), never a partial-byte sentinel. <!-- Updated by plan-sync: T3 ships atomic sentinel write via tmpfile + os.replace -->
+  12. SHA256 task-drift detection — modify a task JSON file post-migration to a value not in the manifest's recorded SHA256, then run `flowctl migrate-rollback --yes`; rollback REFUSES with stderr naming the drifted file. <!-- Updated by plan-sync: T3 ships SHA256 task-drift detection in manifest; not previously specified -->
+  13. Mid-migration contamination wipe — pre-existing `.flow/.migration-manifest` from a prior interrupted migrate is wiped clean before re-init on retry. <!-- Updated by plan-sync: T3 done summary called this out explicitly -->
 - `ci_test.sh` gets a NEW R19/R30 validation block: grep for `flowctl epic` references in canonical skill / agent / command files (FAIL if found, except in deprecation-context comments tagged `# alias-context:` or similar). Mirrors the existing R17/R19 (DDD/strategy fluff) two-tier guard pattern.
 
 ## Investigation targets
@@ -63,7 +70,7 @@ Rewire all smoke tests to assert the new `flowctl spec *` surface. Add a separat
 - [ ] All listed smoke scripts updated; existing test coverage maintained.
 - [ ] `smoke_test.sh` + `prospect_smoke_test.sh` no longer read `.flow/epics/<id>.json` paths directly; assertions go through `flowctl` or probe both legacy + canonical paths.
 - [ ] `alias_smoke.sh` covers all 7 high-value alias paths above; passes in CI.
-- [ ] `migration_smoke.sh` covers all 10 scenarios above; passes on Linux + macOS (Windows lockfile coverage in T3 acceptance).
+- [ ] `migration_smoke.sh` covers all 13 scenarios above (10 originally + 3 added per T3 implementation: 11 atomic sentinel write, 12 SHA256 task-drift detection, 13 mid-migration contamination wipe); passes on Linux + macOS (Windows lockfile coverage in T3 acceptance). <!-- Updated by plan-sync: scenario count expanded from 10 -> 13 to match T3's actual surface -->
 - [ ] `ci_test.sh` has a new section guarding against `flowctl epic` references in canonical (excludes deprecation-context comments via grep -v pattern).
 - [ ] `FLOW_NO_DEPRECATION=1` smoke: alias_smoke.sh asserts banner suppressed when env var set.
 - [ ] Top-level `flowctl show fn-X` smoke confirms NO new `flowctl spec show` subcommand was introduced.

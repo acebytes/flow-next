@@ -28,11 +28,22 @@ Helpers landed in T2 that downstream tests should target: `_emit_rename_deprecat
   - Task JSON `"epic":` -> `"spec":` field rename + legacy strip.
   - Backup `.complete` two-phase marker.
   - Migration manifest at `.flow/.migration-manifest` (top-level, NOT inside backup).
-  - Crash recovery (mock SIGKILL between steps; restart resumes correctly).
-  - Read-only filesystem -> exit code 1 + stderr message.
+  - Crash recovery — T3's 4-case decision tree, one test per case: <!-- Updated by plan-sync: T3 done summary enumerated 4 cases; original spec said "mock SIGKILL" generically -->
+    - No-backup case: simulate crash before backup starts; restart begins from step 4 cleanly.
+    - Partial-backup case: simulate crash mid-copy (no `.complete` marker); restart re-runs backup.
+    - Complete-no-manifest case: simulate crash after `.complete` but before manifest init; restart wipes any pre-existing manifest and reinitializes.
+    - Mid-migration case: simulate crash after manifest populated but before sentinel; restart restores from backup by COPY (not move), retries.
+  - Read-only filesystem -> exit code 1 + stderr message; idempotency check runs BEFORE read-only refusal (already-migrated 1.0 repo on read-only fs is a no-op, NOT exit 1). <!-- Updated by plan-sync: T3 ships idempotency-before-readonly ordering -->
+  - Atomic sentinel write — `.flow/.flow_version` written via tmpfile + `os.replace`; partial-write byte states never persist. <!-- Updated by plan-sync: T3 ships atomic sentinel write -->
+  - SHA256 task-drift detection — manifest records SHA256 per migrated task; rollback refuses on drift unless `--force-overwrite-post-migration-changes`. <!-- Updated by plan-sync: T3 ships content-drift detection beyond mere path enumeration -->
+  - Mid-migration contamination — pre-existing `.flow/.migration-manifest` from interrupted prior run is wiped before re-init on retry. <!-- Updated by plan-sync: T3 done summary called this out -->
 - **`test_lockfile.py`** — covers R8 + R32:
   - `os.mkdir(".flow/.migrating")` atomic-create succeeds.
-  - Second invocation `FileExistsError`; PID reclaim if dead (mock `os.kill` raising `ProcessLookupError`).
+  - Second invocation `FileExistsError`; PID reclaim if dead.
+  - PID-liveness branching — T3 ships POSIX `os.kill(pid, 0)` AND Windows `OpenProcess` ctypes paths. Test both: <!-- Updated by plan-sync: T3 done summary called out cross-platform PID liveness as separate POSIX and Windows ctypes branches -->
+    - POSIX path: mock `os.kill` raising `ProcessLookupError` for dead pid (reclaim succeeds); raising `PermissionError` for live foreign pid (reclaim refuses, waits).
+    - Windows path: mock `ctypes.windll.kernel32.OpenProcess` returning NULL for dead pid (reclaim succeeds); returning a handle for live pid (reclaim refuses).
+  - PID-grace window — lockdir present without pid file longer than `MIGRATE_LOCK_PID_GRACE_SECS` triggers reclaim; within grace window, waits.
   - 30-second wait loop with poll; eventual error.
   - Cross-platform: parametrize fixtures for POSIX and Windows code paths (skip Windows-specific paths on POSIX runner; vice-versa).
   - `migrate-rollback` verifying `.complete` exists; refuses otherwise.
@@ -70,8 +81,8 @@ Helpers landed in T2 that downstream tests should target: `_emit_rename_deprecat
 
 ## Acceptance
 
-- [ ] `pytest plugins/flow-next/tests/test_migrate_rename.py` passes; covers all 9 scenarios listed above.
-- [ ] `pytest plugins/flow-next/tests/test_lockfile.py` passes; lockfile contention + stale-PID reclaim verified.
+- [ ] `pytest plugins/flow-next/tests/test_migrate_rename.py` passes; covers all 13 scenarios listed above (9 originally; expanded to 13 per T3's actual surface — 4-case crash-recovery decision tree replaces single "SIGKILL" test, atomic sentinel write, SHA256 drift detection, mid-migration contamination wipe, idempotency-before-readonly ordering). <!-- Updated by plan-sync: scenario count expanded to match T3 implementation -->
+- [ ] `pytest plugins/flow-next/tests/test_lockfile.py` passes; lockfile contention + stale-PID reclaim verified across BOTH POSIX `os.kill` and Windows `OpenProcess` ctypes branches; PID-grace window honored. <!-- Updated by plan-sync: T3 ships separate POSIX and Windows PID-liveness paths -->
 - [ ] `pytest plugins/flow-next/tests/test_read_compat.py` passes; dual-emit + read-fallback for all 4 field categories.
 - [ ] `pytest plugins/flow-next/tests/test_write_location.py` passes; three layouts (fresh / 0.x-unmigrated / 1.0-migrated) verified.
 - [ ] `pytest plugins/flow-next/tests/test_banner.py` passes; suppression matrix + ack-write semantics verified.
