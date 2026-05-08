@@ -3944,7 +3944,7 @@ def find_dependents(task_id: str, same_epic: bool = False) -> list[str]:
     if not tasks_dir.exists():
         return []
 
-    epic_id = epic_id_from_task(task_id) if same_epic else None
+    spec_id = spec_id_from_task(task_id) if same_epic else None
     dependents: set[str] = set()  # Use set to avoid duplicates
     to_check = [task_id]
     checked = set()
@@ -3963,8 +3963,8 @@ def find_dependents(task_id: str, same_epic: bool = False) -> list[str]:
                 tid = task_data.get("id", task_file.stem)
                 if tid in checked or tid in dependents:
                     continue
-                # Skip if same_epic filter and different epic
-                if same_epic and epic_id_from_task(tid) != epic_id:
+                # Skip if same_epic filter and different spec
+                if same_epic and spec_id_from_task(tid) != spec_id:
                     continue
                 # Support both legacy "deps" and current "depends_on"
                 deps = task_data.get("depends_on", task_data.get("deps", []))
@@ -4140,13 +4140,13 @@ def cmd_detect(args: argparse.Namespace) -> None:
             except Exception as e:
                 issues.append(f"meta.json parse error: {e}")
 
-        # Check required subdirectories. EPICS_DIR is no longer required
-        # (fn-43.1: post-1.0 init creates only specs/) but a 0.x repo without
-        # specs/ AND without epics/ has neither — flag it. Either dir
-        # satisfies the metadata-storage requirement.
-        if not (flow_dir / SPECS_DIR).exists() and not (flow_dir / EPICS_DIR).exists():
-            issues.append(f"{SPECS_DIR}/ missing")
-        for subdir in [TASKS_DIR, MEMORY_DIR]:
+        # Check required subdirectories. SPECS_DIR is always required —
+        # spec markdown lives at .flow/specs/<id>.md regardless of whether
+        # the JSON metadata is in legacy .flow/epics/ or canonical
+        # .flow/specs/. A 0.x repo always had .flow/specs/ for markdown,
+        # so requiring it is back-compat-safe; EPICS_DIR alone is not
+        # sufficient (cat / set-plan / export would fail on the .md path).
+        for subdir in [SPECS_DIR, TASKS_DIR, MEMORY_DIR]:
             if not (flow_dir / subdir).exists():
                 issues.append(f"{subdir}/ missing")
 
@@ -13527,12 +13527,13 @@ def validate_flow_root(flow_dir: Path) -> list[str]:
         except Exception as e:
             errors.append(f"meta.json unreadable: {e}")
 
-    # Check required subdirectories exist. fn-43.1: post-1.0 init creates
-    # only specs/ — a repo with neither specs/ nor epics/ has nowhere for
-    # spec metadata to live. Either dir satisfies the requirement.
-    if not (flow_dir / SPECS_DIR).exists() and not (flow_dir / EPICS_DIR).exists():
-        errors.append(f"Required directory missing: {SPECS_DIR}/")
-    for subdir in [TASKS_DIR, MEMORY_DIR]:
+    # Check required subdirectories exist. SPECS_DIR is always required —
+    # spec markdown lives at .flow/specs/<id>.md regardless of layout. The
+    # JSON metadata may live in legacy .flow/epics/ (alias-mode 0.x) or
+    # canonical .flow/specs/ (fresh 1.0+), but the markdown path is
+    # invariant. A repo with epics/ but no specs/ would crash on cat /
+    # set-plan / export-cognitive-aid downstream — flag it loudly here.
+    for subdir in [SPECS_DIR, TASKS_DIR, MEMORY_DIR]:
         if not (flow_dir / subdir).exists():
             errors.append(f"Required directory missing: {subdir}/")
 
