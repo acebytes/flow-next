@@ -17,25 +17,123 @@ This repo is a Claude Code plugin marketplace. It ships two plugins: **flow** an
 Zero-dependency workflow with bundled `flowctl.py`. All state in `.flow/` directory.
 
 Commands:
+- `/flow-next:prospect [focus hint]` → upstream-of-plan idea generation. Generates ranked candidates, critiques each one, writes ranked artifact under `.flow/prospects/<slug>-<date>.md`. Promote a survivor via `flowctl prospect promote <id> --idea N`. User-triggered only; Ralph-out (exits 2 under `REVIEW_RECEIPT_PATH` / `FLOW_RALPH=1`). Added in 0.36.0.
 - `/flow-next:plan` → creates epic + tasks in `.flow/`
 - `/flow-next:work` → executes tasks with re-anchoring
 - `/flow-next:interview` → deep spec refinement
-- `/flow-next:plan-review` → Carmack-level plan review via rp-cli
-- `/flow-next:impl-review` → Carmack-level impl review (current branch)
+- `/flow-next:plan-review` → Carmack-level plan review (rp-cli, Codex CLI, or Copilot CLI)
+- `/flow-next:impl-review` → Carmack-level impl review of current branch (rp-cli, Codex CLI, or Copilot CLI)
+- `/flow-next:make-pr [<epic-id>] [--draft|--ready] [--no-mermaid] [--base <ref>] [--memory] [--dry-run]` → render a cognitive-aid PR body from nine flow-next input streams (epic spec with R-IDs, per-task `done_summary` + evidence commits, decisions / bug / architecture-patterns memory, glossary changes, strategy alignment, deferred review findings, the diff itself) and open the PR via `gh pr create`. Body sections: TL;DR, R-ID coverage table (R# → satisfying task → evidence commit), Critical changes (high-churn / cross-module / public-interface / security-sensitive / behavior-visible), Decisions, Memory, Glossary/strategy deltas, Open items, Where to look (reviewer-focus list). Mermaid codefences when diff crosses ≥2 modules (max 3 diagrams × 12 nodes; markdown codefence — GitHub / GitLab / Gitea render natively). Uses `gh pr create --body-file` not heredoc (LLM-markdown safety). Default `--draft` if open items > 0 or under Ralph; `--ready` overrides. Backed by `flowctl epic export-cognitive-aid` plumbing (deterministic 9-stream JSON aggregation). Hard-errors when a PR already exists for the current branch. NOT Ralph-blocked — PR creation is the autonomous-loop terminus. NO cross-model review of the body — each harness identifies critical changes from the structured input; `/flow-next:impl-review` already covers the *code itself*. Added in 0.42.0.
+- `/flow-next:resolve-pr [PR# | comment URL]` → resolve GitHub PR review threads (fetch → triage → dispatch resolver agents → validate → commit → reply → resolve via GraphQL). User-triggered only; Ralph does not invoke. Flags: `--dry-run`, `--no-cluster`. Parallel dispatch on Claude Code, serial on Codex/Copilot/Droid. Zero runtime deps beyond `gh` + `jq`. Added in 0.34.0.
+- `/flow-next:audit [mode:autofix] [scope hint]` → agent-native memory staleness review. Walks `.flow/memory/`, reviews each entry against current code, decides per entry: Keep / Update / Consolidate / Replace / Delete. Interactive (asks via blocking-question tool) or autofix (applies unambiguous, marks ambiguous as stale). Skips legacy flat files. The skill IS the agent — no Python engine, no subprocess dispatch. Added in 0.37.0.
+- `/flow-next:capture [mode:autofix] [--rewrite <id>] [--from-compacted-ok] [--yes]` → agent-native skill that synthesizes conversation context into a flow-next epic spec at `.flow/specs/<epic-id>.md` via existing `flowctl epic create + epic set-plan` (no new flowctl subcommands). Sits between free-form discussion / prospect-promotion and the formal plan/interview phase — the automated alternative to the manual `flowctl epic create + epic set-plan` heredoc. Hard guardrails: source-tagged criteria (`[user]` / `[paraphrase]` / `[inferred]`), mandatory read-back loop with `[inferred]` count, duplicate-epic detection (Phase 0 scans `.flow/epics/` + `flowctl memory search`), compaction detection (refuses without `--from-compacted-ok`), idempotency-via-`--rewrite`, must-ask cases for ambiguous title / untestable acceptance / scope-conflict, suggest-split at 8+ acceptance criteria (never auto-splits). Ralph-blocked. Added in 0.38.0.
+- `/flow-next:interview` (enhanced in 0.38.0) folds three patterns from upstream `grill-me`: (a) lead-with-recommendation — every `AskUserQuestion` body includes options summary, recommended option, one-sentence rationale, confidence tier (`[high]` / `[judgment-call]` / `[your-call]`); (b) codebase-before-asking — pre-question taxonomy splits codebase-answerable ("what exists") from user-judgment-required ("what should"); codebase-answerable questions are investigated via Read/Grep/Glob and logged to a `## Resolved via Codebase` spec section; (c) dependency-ordered branches — depth cap 4, discover-as-you-go, surface abandoned branches. **Doc-aware mode (0.39.0+, extended in 0.40.0):** autodetects when ANY of `GLOSSARY.md` has at least one term (husks ignored) OR `knowledge/decisions/` has entries OR `STRATEGY.md` has `sections_filled >= 1`; override via `--docs` / `--no-docs` (cascade to all three) and the explicit `--strategy` / `--no-strategy` pair which always wins over the cascade for the strategy slot (5-row flag matrix). Five behaviors: glossary lookup before terminology questions (writes a `## Glossary Conflicts` spec section when user wording diverges from canonical), inline glossary write on resolution (`flowctl glossary add`), decision-record prompt with three-criteria gate + read-back when a load-bearing choice is made, code/spec contradiction surfaced rather than silently overwritten, code-versus-strategy contradiction surfaced in a `## Strategy Conflicts` spec section parallel to `## Glossary Conflicts` (≤1 strategy-conflict question per turn, gated on `STRATEGY_AWARE=1`).
+- `/flow-next:strategy [optional: section to revisit]` → agent-native skill that writes/maintains a repo-root `STRATEGY.md` (peer of `GLOSSARY.md` / `README.md`, never under `.flow/`). 5 required sections (`Target problem` / `Our approach` / `Who it's for` / `Key metrics` / `Tracks`) + 2 optional (`Milestones` / `Not working on`); CE's `Marketing` section dropped. Atomic per-section writes; `last_updated` bumps on every save. Foreign-file refusal via `generator: flow-next-strategy` frontmatter sentinel. Pushback discipline (2 rounds max per section). Single-root walk from cwd up to repo root (NOT nearest-ancestor like glossary — strategy is repo-wide by Rumelt's definition). Ralph-blocked. Downstream skills (prospect / plan / interview / capture / sync) consume `STRATEGY.md` read-only. Added in 0.40.0.
+
+Review backend spec grammar (v0.31.0+):
+- `backend[:model[:effort]]` — colon-delimited, trailing parts optional
+- Examples: `rp`, `codex`, `codex:gpt-5.5:xhigh`, `copilot:claude-opus-4.5:high`
+- RP bare only (model set via window config); `none` accepted as explicit opt-out
+- Valid values: `flowctl review-backend --help`, full catalog in plugin README
+- Resolution precedence (first match wins): `--spec` CLI flag > per-task `review` > per-epic `default_review` > `FLOW_REVIEW_BACKEND` env > `.flow/config.json` `review.backend` > backend-specific env (`FLOW_CODEX_MODEL`, `FLOW_COPILOT_EFFORT`, ...) > registry default
+- Legacy bare-backend values (`codex`, `copilot`) still work; unparseable strings fall back to bare backend with stderr warning
+- `flowctl review-backend --json` returns `{backend, spec, model, effort, source}` (spec-form round-trippable); text mode prints bare backend for skill grep back-compat
+- Receipts now include a `spec` field alongside `model` + `effort`: `{"mode": "codex", "model": "gpt-5.5", "effort": "high", "spec": "codex:gpt-5.5:high"}`
+
+R-ID convention (v0.32.1+):
+- New epic specs number acceptance criteria as `- **R1:** ...`, `- **R2:** ...` in creation order (plain markdown prose, not YAML).
+- Renumber-forbidden after first review cycle — deletions leave gaps (`R1, R3, R5`); new criteria take the next unused number.
+- Task specs may carry optional `satisfies: [R1, R3]` frontmatter linking to the epic's R-IDs; additive and omittable.
+- Plan skill writes R-IDs on every new spec; plan-sync preserves them during drift updates. See `plugins/flow-next/skills/flow-next-plan/steps.md` for the full rule.
+
+Review rigor additions (v0.32.1+):
+- Review receipts may carry optional fields: `unaddressed` (array of R-IDs not addressed by the branch), `suppressed_count` (dict keyed by confidence anchor: `{"50": 3, "25": 7, "0": 2}`), `introduced_count`, `pre_existing_count`. New receipt `mode: triage_skip` indicates trivial-diff fast-path. All additive; old Ralph scripts read by key and ignore unknowns.
+- `flowctl triage-skip --base <ref>` runs a deterministic whitelist (lockfile-only / docs-only / release-chore / generated-file-only) and returns `VERDICT=SHIP` without invoking the configured backend. On by default in Ralph mode; opt-out via `--no-triage` or `FLOW_RALPH_NO_TRIAGE=1`. Optional fast-model LLM judge for ambiguous diffs gated behind `FLOW_TRIAGE_LLM=1`.
+- Review prompts score findings on five discrete confidence anchors (`0 / 25 / 50 / 75 / 100`) and suppress `<75` except P0 @ 50+; findings classified `introduced` vs `pre_existing` (verdict gate considers only `introduced`); protected-artifact list prevents findings that recommend deletion of `.flow/*`, `scripts/ralph/*`, etc.
+
+Opt-in review flags (v0.35.0+) — all off by default; default review shape unchanged:
+- `--validate` or `FLOW_VALIDATE_REVIEW=1` — on `NEEDS_WORK`, dispatches a validator pass (same backend session via receipt resume) that drops confirmed false-positives; upgrades `NEEDS_WORK → SHIP` only when all findings drop (never downgrades `SHIP` / `MAJOR_RETHINK`). Receipt: `validator: {dispatched, dropped, kept, reasons}`, `validator_timestamp`, `verdict_before_validate`. Conservative bias — missing ids default to kept.
+- `--deep` or `FLOW_REVIEW_DEEP=1` — runs primary first, then deep passes in the same chat (adversarial always; security + performance auto-enabled via `flowctl review-deep-auto`; explicit form `--deep=adversarial,security`). Findings merged via fingerprint dedup (primary wins); primary+deep cross-pass agreement promotes primary's confidence one anchor step (ceiling 100). Deep can upgrade `SHIP → NEEDS_WORK` on new blocking `introduced` findings; never downgrades. Receipt: `deep_passes`, `deep_findings_count`, `cross_pass_promotions`, `verdict_before_deep`, `deep_timestamp`.
+- `--interactive` — per-finding Apply/Defer/Skip/Acknowledge walkthrough via platform blocking-question tool; "LFG the rest" auto-classifies remainder (P0/P1 @ confidence ≥ 75 → Apply, else → Defer). Deferred findings append to `.flow/review-deferred/<branch-slug>.md`. **Hard-errors in Ralph mode** (when `REVIEW_RECEIPT_PATH` or `FLOW_RALPH=1` is set). No env var — per-invocation only. Walkthrough never flips verdict. Receipt: `walkthrough: {applied, deferred, skipped, acknowledged, lfg_rest}`, `walkthrough_timestamp`. New helpers: `flowctl review-walkthrough-defer`, `flowctl review-walkthrough-record`.
+- Phase order when flags combine: `primary → deep → validate → interactive → verdict`. Receipt schema is additive — existing Ralph scripts ignore unknowns.
 
 Ralph (autonomous loop):
 - Script template lives in `plugins/flow-next/skills/flow-next-ralph-init/templates/`.
 - Ralph uses `flowctl rp` wrappers (not direct rp-cli) for reviews.
 - Receipts gate progress when `REVIEW_RECEIPT_PATH` is set.
+- `config.env` accepts spec form on `PLAN_REVIEW` / `WORK_REVIEW` / `COMPLETION_REVIEW` (e.g. `WORK_REVIEW=codex:gpt-5.5:xhigh`). `ralph.sh` exports the full spec via `FLOW_REVIEW_BACKEND` and derives `PLAN_REVIEW_BACKEND` / `WORK_REVIEW_BACKEND` / `COMPLETION_REVIEW_BACKEND` (bare backend, via `${VAR%%:*}`) for prompt-level branching.
 - Runbooks: `plans/ralph-e2e-notes.md`, `plans/ralph-getting-started.md`.
 
-Memory system (opt-in):
+Memory system (categorized — v0.33.0+):
 - Config in `.flow/config.json` (NOT Ralph's `config.env`)
+- Tree under `.flow/memory/`: `bug/<category>/*.md` + `knowledge/<category>/*.md` (one entry per file)
+- Knowledge categories: `architecture-patterns`, `conventions`, `tooling-decisions`, `workflow`, `best-practices`, `decisions` (the last shipped in 0.39.0 for load-bearing architectural choices — body convention 1–3 sentences on trade-offs, irreversibility, surprise factor)
+- YAML frontmatter: `title`, `date`, `track`, `category`, `module`, `tags`, plus track-specific fields (`problem_type` / `root_cause` / `resolution_type` for bug; `applies_when` for knowledge). Decision entries (knowledge track, `decisions` category) may add `decision_status` (proposed | accepted | superseded), `superseded_by` (id), `alternatives_considered` (prose) — additive; permitted on any knowledge entry but specifically intended for the `decisions/` subtree. Constants `MEMORY_DECISION_FIELDS` / `MEMORY_DECISION_STATUSES` (alongside `MEMORY_KNOWLEDGE_FIELDS` / `MEMORY_STATUS`).
 - Enable: `flowctl config set memory.enabled true`
 - Init: `flowctl memory init`
-- Add: `flowctl memory add --type <pitfall|convention|decision> "content"`
-- Query: `flowctl memory list`, `flowctl memory search "pattern"`
-- Auto-capture: NEEDS_WORK reviews → pitfalls.md (in Ralph mode)
+- Add: `flowctl memory add --track <bug|knowledge> --category <c> --title "..." [--module <m>] [--tags "a,b"] [--body-file <f>]`
+- Query: `flowctl memory list [--track T] [--category C] [--status active|stale|all]`, `flowctl memory search <q> [--module <m>] [--tags "a,b"] [--limit N]`
+- Read: `flowctl memory read <id>` — accepts full id (`bug/runtime-errors/slug-YYYY-MM-DD`), slug+date, slug-only (latest wins), or legacy forms (`legacy/pitfalls.md`, `legacy/pitfalls#N`)
+- Migrate legacy (skill, v0.37.0+): `/flow-next:memory-migrate [mode:autofix] [scope hint]` — agent-native, host agent classifies each entry into the right `(track, category)` with full repo context. Recommended path. Interactive (asks via blocking-question tool on ambiguous) or autofix (mechanical default + logs as needs-review). Optional scope hint narrows to a single legacy file (e.g. `pitfalls.md`).
+- Migrate legacy (deterministic, automation): `flowctl memory migrate --dry-run` then `--yes` (mechanical-only since v0.37.0; subprocess classifier dispatch removed; `--no-llm` accepted-but-noop). JSON mode refuses writes without `--yes`. Stderr deprecation hint points at `/flow-next:memory-migrate` for accurate classification (suppress via `FLOW_NO_DEPRECATION=1`). Removed env vars: `FLOW_MEMORY_CLASSIFIER_BACKEND` / `_MODEL` / `_EFFORT` (setting them now triggers a one-time stderr warning).
+- List legacy entries (parsing helper, v0.37.0+): `flowctl memory list-legacy [--json]` — emits parsed segments with mechanical default `(track, category)` per entry. Used by `/flow-next:memory-migrate` skill; also useful for ad-hoc inspection.
+- Surface in AGENTS.md / CLAUDE.md: `flowctl memory discoverability-patch [--target auto|agents|claude] [--strategy listing|append] [--apply|--dry-run]` (JSON callers must pass `--apply` explicitly)
+- Audit (skill, v0.37.0+): `/flow-next:audit [mode:autofix] [scope hint]` — agent-native skill that reviews entries against current code and decides Keep/Update/Consolidate/Replace/Delete per entry. Interactive (asks via blocking-question tool) or autofix (applies unambiguous, marks ambiguous as stale). Skips legacy flat files (run `/flow-next:memory-migrate` first).
+- Mark stale: `flowctl memory mark-stale <id> --reason "..." [--audited-by "..."] [--json]` — sets `status: stale`, stamps `last_audited`, records `audit_notes`. Used by `/flow-next:audit`; also callable directly. Idempotent.
+- Mark fresh: `flowctl memory mark-fresh <id>` — clears stale flag, stamps `last_audited`.
+- Search status filter: `flowctl memory search <q> --status active|stale|all` (default `active`, v0.37.0+). Stale entries excluded from default search results so audit-flagged advice stops polluting `memory-scout` output.
+- Overlap detection on add: high overlap updates existing in place; moderate creates new with `related_to: [existing-id]`
+- Auto-capture: Ralph worker writes bug-track entries on NEEDS_WORK → SHIP via `memory add --track bug --category <c>`
+- `memory-scout` is category-aware: returns track/category-tagged results, prioritizing module matches
+- Backcompat: `memory add --type pitfall|convention|decision` auto-maps to new flags with a deprecation warning; removed in 0.36.0
+- Legacy flat files (`.flow/memory/pitfalls.md` etc.) continue to work until `/flow-next:memory-migrate` runs (or `flowctl memory migrate --yes` for automation); `search` surfaces legacy hits as `track: "legacy"` synthetic entries
+
+Prospecting (v0.36.0+):
+- New skill `/flow-next:prospect [focus hint]` — upstream of `interview`/`plan` for "what should I build?" phase. Generates many candidates grounded in repo (recent files, open epics, memory, CHANGELOG), critiques every one with rejection taxonomy (`duplicates-open-epic | out-of-scope | insufficient-signal | too-large | backward-incompat | other`), ranks survivors into buckets (`High leverage 1-3` / `Worth considering 4-7` / `If you have the time 8+`).
+- Artifact under `.flow/prospects/<slug>-<date>.md` (atomic write; same-day collisions suffixed `-2`/`-3`). YAML frontmatter: `title`, `date` (quoted), `focus_hint`, `volume`, `survivor_count`, `rejected_count`, `rejection_rate`, `artifact_id`, `promoted_to` (inline-flow dict `{N: [epic-id]}`, omitted when empty), `status` (`active|corrupt|stale|archived`).
+- Subcommands: `flowctl prospect list [--all] [--json]` (default <30d), `flowctl prospect read <id> [--section focus|grounding|survivors|rejected]`, `flowctl prospect promote <id> --idea N [--epic-title "..."] [--force] [--json]`, `flowctl prospect archive <id>`.
+- Volume semantics: `top N` = N survivors; `N ideas` = generate ≥N candidates; `raise the bar` = 60-70% rejection target; default = 15-25 → 5-8.
+- Rejection floor ≥40% (R12) — critique that rejects fewer asks user to regenerate / loosen / ship-anyway.
+- Persona seeding (R18) ≥2 personas: `senior-maintainer`, `first-time-user`, `adversarial-reviewer`. Two-pass generate-then-critique with separate prompts.
+- Promote allocates an epic via the same scan-based logic as `cmd_epic_create`, inlining the spec write so the prospect-context spec lands on disk from the first byte. Idempotency guard (R14): refuses if `promoted_to` contains the target idea; `--force` overrides.
+- Exit codes: `read`/`promote` on corrupt artifact → 3 (stderr `[ARTIFACT CORRUPT: <reason>]`); duplicate idea on `promote` without `--force` → 2; Ralph-block (`REVIEW_RECEIPT_PATH`/`FLOW_RALPH=1`) on `/flow-next:prospect` → 2.
+- User-triggered only. Ralph autonomous loop is unaffected — autonomous loops have no business deciding what a repo should tackle next.
+
+Project glossary (v0.39.0+):
+- `GLOSSARY.md` lives at the **repo root** (and optionally subdirectories), NOT inside `.flow/`. Survives `rm -rf .flow/` — the project's canonical wording is the project's, not flow-next's (R18 — survives uninstall by design).
+- H2-per-term markdown format aligned with `open-gitops/documents` and `glossarify-md` so generic markdown tooling reads it cleanly.
+- Resolution: nearest-ancestor walk from cwd up to repo root, first match wins (same shape as `tsconfig.json` / EditorConfig). Cap 32 levels with cycle detection (`GLOSSARY_WALK_MAX_DEPTH`).
+- Subcommands:
+  - `flowctl glossary add <term> [--definition ... | --definition-file FILE | -] [--avoid a,b] [--relates-to x,y] [--json]` — upserts case-insensitively. Creates `GLOSSARY.md` at repo root if no ancestor file exists.
+  - `flowctl glossary list [--json]` — `{groups: [{path, entries, count}], file_count, total_terms}` grouped by file (nearest first).
+  - `flowctl glossary read <term> [--json]` — walks ancestors, returns `{path, term, definition, avoid, relates_to}`; first match wins.
+  - `flowctl glossary remove <term> [--json]` — removes from the file that defines it. Last-term `remove` leaves a `# Glossary` H1 husk on disk (R18 — never deletes the file).
+- Husk semantics: `total_terms == 0` (or `file_count == 0`) means no glossary signal. Doc-aware autodetect uses `flowctl glossary list --json | jq '.total_terms > 0'`, NOT `[[ -f GLOSSARY.md ]]` — a plain file-existence check would falsely activate doc-aware mode on an empty husk.
+- Helpers (callable from Python; downstream skills should prefer flowctl subcommands): `find_nearest_glossary` / `find_all_glossaries` / `parse_glossary_file` / `render_glossary_file` / `validate_glossary_entry` / `_glossary_term_matches` / `_glossary_strip_fenced_code`. Fenced code blocks inside definitions are masked during parse so example terms in code don't get parsed as headings.
+- Plan-sync contract: glossary renames replace `_Avoid_` aliases inline with the canonical term + breadcrumb (`<!-- Updated by plan-sync: glossary rename ... -->`); decision-record overrides are surfaced read-only under "Decision overrides flagged for review" — sync **never auto-supersedes** explicit historical choices.
+- Forbidden vocabulary (R17): a small list of jargon terms is grep-guarded out of canonical skill / agent / command / flowctl prose by `ci_test.sh` section 5c, and out of the Codex mirror by `scripts/sync-codex.sh` validation block. Two-tier guard prevents drift through either source path.
+
+Project strategy (v0.40.0+):
+- `STRATEGY.md` lives at the **repo root** (peer of `GLOSSARY.md` / `README.md`), NOT inside `.flow/`. Survives `rm -rf .flow/` — strategic intent is the project's, not flow-next's (R1 / R22 — survives uninstall by design, mirrors the glossary R18 invariant).
+- **Single-root resolution (NOT nearest-ancestor like glossary).** `flowctl strategy *` resolves the repo root from cwd via `git rev-parse --show-toplevel` and checks for `STRATEGY.md` ONLY at that root — no upward walk, no cascade. An `apps/web/STRATEGY.md` (intentional or accidental) is always ignored; downstream skills consume the repo-root file regardless of cwd. Strategy is repo-wide by Rumelt's definition (one diagnosis, one guiding policy, coherent action) — multiple cascading STRATEGY.md files re-introduce the "is for everyone, is for no one" problem the skill exists to prevent. Glossary cascades because vocabulary is local; strategy is global. Subdirectory invocation surfaces `Using repo-root STRATEGY.md at <path>` before any interview question.
+- **Frontmatter (3 keys only):** `name`, `last_updated` (ISO date), `generator: flow-next-strategy`. The generator key is the foreign-file sentinel — without it the skill prompts (migrate / keep / rewrite?). Multi-format migration deferred to v2.
+- **Section structure (locked, Rumelt-aligned):** 5 required (`Target problem` / `Our approach` / `Who it's for` / `Key metrics` / `Tracks`) + 2 optional (`Milestones` / `Not working on`). Maps onto Rumelt's strategy kernel — diagnosis / guiding policy / coherent action — extended with persona + metrics for repo-doc utility. A `Marketing` section was considered and dropped (over-rotated for OSS-tools repos). Optional sections deleted entirely if unused; never left as empty headers. Last-section deletion leaves a husk (H1 + frontmatter) — file never deleted (R23).
+- **Subcommands (read-only plumbing — no `add/edit/remove`):**
+  - `flowctl strategy status [--json]` — `{exists, husk, sections_filled, total_sections, last_updated, file_path}`. Husk: file exists but `sections_filled == 0`.
+  - `flowctl strategy read [--section <name>] [--json]` — single-root walk; returns `{path, name, last_updated, target_problem, approach, personas, metrics, tracks, milestones, not_working_on}`; `--section` filters one block.
+  - `flowctl strategy list [--json]` — parallel to `flowctl glossary list` (degenerate single-element group for v1) so downstream skills can iterate generically.
+  - No `flowctl strategy add/edit` — strategy is too prose-heavy for atomic field-set CLI; the skill IS the editor (per the agentic-vs-deterministic architecture rule).
+- **Husk semantics:** `sections_filled == 0` (or `file_count == 0`) means no strategic-intent signal. Doc-aware autodetect uses `flowctl strategy status --json | jq '.sections_filled >= 1'`, NOT `[[ -f STRATEGY.md ]]` — a plain file-existence check would falsely activate on an empty husk (same trap glossary fell into).
+- **Doc-aware autodetect — third condition.** Doc-aware mode now activates when ANY of: `glossary.total_terms > 0` OR `knowledge/decisions/` has entries OR `strategy.sections_filled >= 1`. Override flags follow a cascade-with-explicit-override rule: `--docs` / `--no-docs` cascade to all three categories (glossary + decisions + strategy); explicit `--strategy` / `--no-strategy` always wins over the cascade for the strategy slot. 5-row matrix: `(default)` autodetect all three; `--docs` on for all three; `--no-docs` off for all three; `--no-docs --strategy` strategy on / glossary+decisions off; `--docs --no-strategy` glossary+decisions on / strategy off.
+- **Downstream consumers (read-only, advisory, never auto-supersede):**
+  - `/flow-next:prospect` Phase 0 grounding — injects approach + active tracks verbatim into candidate-generation prompt; adds `out-of-scope-vs-strategy` to the rejection taxonomy.
+  - `/flow-next:plan` research scan — emits a `## Strategy Alignment` spec section listing which active tracks the plan serves; drift surfaced as `## Strategy drift flagged for review` block (read-only).
+  - `/flow-next:interview` doc-aware — surfaces conflicts in a `## Strategy Conflicts` spec section parallel to `## Glossary Conflicts`; ≤1 strategy-conflict question per turn.
+  - `/flow-next:capture` Phase 0 — source-tags strategy-derived acceptance criteria as `[strategy:<track-name>]`; refuses to write spec contradicting an active track without `--override-strategy` (which prompts for a decision record).
+  - `/flow-next:sync` plan-sync — surfaces drift in a `## Strategy drift flagged for review` heading; track renames replace inline with a `<!-- Updated by plan-sync: track rename ... -->` breadcrumb. NEVER auto-supersedes.
+- **Foreign-file refusal in v1.** `STRATEGY.md` without the `generator: flow-next-strategy` frontmatter sentinel routes via `AskUserQuestion` (migrate / keep / rewrite?). On "keep" — exits without writing. On "rewrite" — confirms via second prompt before destructive overwrite. v1 explicitly defers automatic migration of CE-format / hand-written files to v2.
+- **Forbidden vocabulary (R19 — separate from R17 DDD).** Tier 1 jargon only — Rumelt's "fluff" hallmarks: `synergy / pivot / disrupt / thought-leadership / best-in-class / world-class / 10x`. Two-tier guard: canonical scan in `ci_test.sh` (separate block from R17 — comment specifies "strategy-doc fluff guard, NOT R17"; never merge them) + Codex-mirror scan in `sync-codex.sh` validation block. The `references/interview.md` file is excluded — must describe anti-patterns to push back on them (same exemption as glossary references).
+- **Ralph-blocked.** `/flow-next:strategy` exits 2 with stderr `[STRATEGY: user-triggered only — Ralph cannot run /flow-next:strategy]` when `FLOW_RALPH=1` or `REVIEW_RECEIPT_PATH` is set. Mirrors `/flow-next:prospect` and `/flow-next:capture`. Autonomous loops have no business deciding repo strategy.
 
 ### flow
 Original plugin with optional Beads integration. Plan files in `plans/`.
@@ -70,9 +168,64 @@ Commands:
 - Avoid feature flags or backwards-compatibility scaffolding (plugins are pre-release).
 - Do not add extra commands/agents/skills unless explicitly requested.
 
-## Cross-platform patterns (Claude Code + Factory Droid)
+## Architecture: agentic vs deterministic (READ THIS BEFORE PLANNING NEW FEATURES)
 
-flow-next supports both Claude Code and Factory Droid. Follow these patterns:
+flow-next is a **skill-driven plugin that runs inside an agentic coding environment** (Claude Code, Codex, Factory Droid). The host agent IS the intelligence. When designing new features, default to skill-based architecture and only reach for deterministic Python in flowctl when there's a real reason.
+
+### When to use a SKILL (the default)
+
+A workflow that:
+- Walks files, makes per-item judgments, applies engineering decisions
+- Investigates code (reads, greps, traces references) and forms conclusions
+- Composes multi-step actions where each step depends on context from prior steps
+- Asks the user for input on ambiguous cases
+- Could reasonably be invoked via `/flow-next:<command>` slash command
+
+→ **Build it as a skill.** The host agent reads the skill workflow file, executes it using its existing Read/Grep/Glob/Edit/Write tools, dispatches subagents via the platform primitive (`Agent`/`Task` in Claude, `spawn_agent` in Codex), asks the user via `AskUserQuestion`. Canonical skill files always use Claude-native tool names; `sync-codex.sh` rewrites them in the Codex mirror (`AskUserQuestion` → `request_user_input`, etc.). Examples: `/flow-next:audit` (fn-34), `/flow-next:prospect` (fn-33), `/flow-next:resolve-pr` (fn-31), `/flow-next:plan`, `/flow-next:work`.
+
+**Do not spawn `codex` / `copilot` / other LLMs via subprocess from inside flowctl when invoked from a skill.** The host agent is already an LLM running the skill — there is no need for a second one. fn-34 originally violated this and was rewritten; fn-30's `memory migrate` was the next refactor target — both shipped in 0.37.0 as `/flow-next:audit` and `/flow-next:memory-migrate`.
+
+### When to use DETERMINISTIC flowctl Python
+
+Mechanical operations that need to work without an agent in the loop:
+- Ralph hooks (PreToolUse, Stop, SubagentStop matchers) — fire from non-agent contexts
+- Receipts (review receipts, walkthrough receipts, ralph_blocked receipts) — file format read by Ralph scripts that may not have an agent
+- Schema validation (`validate_memory_frontmatter`, `validate_prospect_frontmatter`) — pure invariant check, must be fast and predictable
+- Atomic writes (`write_memory_entry`, `write_prospect_artifact`) — file-system operations, no judgment involved
+- Git plumbing (PR comment threading, GraphQL fetches, status checks)
+- Triage skip whitelist (lockfile-only / docs-only / generated-file diffs) — fast deterministic path before Ralph would otherwise run a review
+- Backend dispatch for review subsystem (`flowctl rp`, `flowctl review-backend`) — reviews need a fresh second-opinion LLM, separate from the host agent. This is the one legitimate "shell out to another LLM" pattern in the codebase.
+
+→ **Build it in flowctl Python.** Pure plumbing with no intelligence required.
+
+### When to use a SKILL + thin flowctl plumbing (the common pattern)
+
+Most flow-next features look like this. Skill drives the workflow; flowctl provides atomic helpers the skill calls:
+- `/flow-next:prospect` skill + `flowctl prospect list/read/promote/archive` (atomic artifact CRUD)
+- `/flow-next:audit` skill + `flowctl memory mark-stale/mark-fresh` + `memory search --status` (frontmatter writes + filter)
+- `/flow-next:work` skill + `flowctl task start/done/show` (state transitions)
+
+**Split rule:** flowctl owns "set this field" / "validate this schema" / "atomic-write this file" / "list these things." Skill owns "read this and judge whether to act" / "compose multi-step decision flow" / "ask user when unsure" / "dispatch subagents for parallel investigation."
+
+### How to spot a mistake
+
+Symptoms that suggest you're building deterministic when you should build skill-based:
+- You're writing regex to extract "code references" from prose → host agent can read prose
+- You're building a stoplist of common English words → host agent knows English
+- You're spawning `codex --exec` or `copilot exec` to make judgments → host agent makes judgments
+- You're parsing structured-verdict YAML from an LLM response → host agent's own structured output
+- You're building a deterministic "fallback" engine in case LLM unavailable → host agent is always available when invoked from a slash command
+- You're writing weighted scoring math to substitute for "is this still relevant?" → host agent answers that directly
+
+If three or more of these apply, stop and convert to a skill. The deterministic path is harder to maintain, more brittle, and provides worse output than the agent does directly.
+
+### Reference: the agent-native "audit my docs" pattern
+
+The entire `/flow-next:audit` workflow (fn-34) is a markdown skill file the host agent reads + executes — no Python, no subprocess, no engine. The skill IS the agent. flow-next's `/flow-next:audit` is the canonical example of this pattern; `/flow-next:memory-migrate` (fn-35) and `/flow-next:strategy` (fn-39) follow the same shape.
+
+## Cross-platform patterns (Claude Code + Codex + Factory Droid)
+
+flow-next is a first-class citizen on Claude Code, Codex, and Factory Droid. **Architectural rule: canonical skill files use Claude-native tool names. `sync-codex.sh` rewrites them in the Codex mirror.** This keeps skill prose concrete (the agent always sees a literal tool name it recognizes), avoids fragile "platform abstraction" reasoning, and keeps cross-platform maintenance centralized in one place — the sync script.
 
 **Variable references** — use bash fallback:
 ```bash
@@ -99,6 +252,39 @@ disallowedTools: Edit, Write, Task
 PLUGIN_JSON="${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json"
 [[ -f "$PLUGIN_JSON" ]] || PLUGIN_JSON="${CLAUDE_PLUGIN_ROOT}/.factory-plugin/plugin.json"
 ```
+
+**Blocking-question tool** — every interactive skill that asks the user MUST reach for the platform's blocking-question primitive (NOT a plain-text prompt). Canonical skill files write the literal Claude-native name; the sync script does the rewriting.
+
+| Source (canonical Claude) | After `sync-codex.sh` (Codex mirror) | Droid |
+|---------------------------|---------------------------------------|-------|
+| `AskUserQuestion` | `request_user_input` | `ask_user` (currently no Droid mirror — Droid users see canonical; Droid mirror is a future hotfix) |
+| `ToolSearch select:AskUserQuestion` (schema-load fallback) | _stripped_ — Codex doesn't use ToolSearch | n/a |
+| Plain-text fallback ("if tool unreachable, print numbered list") | preserved verbatim | preserved |
+
+Canonical phrasing reference: `flow-next-audit/SKILL.md:62`. **Always use bare `AskUserQuestion` in canonical files.** Do NOT write inline cross-platform tables in the skill prose — they pollute the agent's context with abstraction noise. The single exception: a parenthetical breadcrumb noting "sync-codex.sh rewrites this to `request_user_input` in the Codex mirror" is fine for maintainer clarity (sync-codex.sh strips this line in the Codex output too).
+
+**Subagent dispatch** — when a skill spawns a parallel investigation or worker, write the Claude-native primitive in canonical (`Task` with `subagent_type: Explore`); sync-codex.sh rewrites to `spawn_agent` for the Codex mirror. Read-only enforcement via `disallowedTools: Edit, Write, Task` (canonical) → `disallowed_tools` (Codex `.toml`).
+
+Canonical reference: `flow-next-audit/workflow.md:158-183` (post-cleanup — the inline cross-platform table there has been removed; the canonical now uses Claude-native names with a sync-rewrites breadcrumb).
+
+### Adding a new user-facing skill (checklist)
+
+When adding a new `/flow-next:<name>` skill, every step below MUST be done. Skipping any creates silent Codex degradation that won't surface for releases.
+
+1. **Canonical skill** at `plugins/flow-next/skills/flow-next-<name>/SKILL.md` (+ `workflow.md` / `phases.md` as needed). Frontmatter: `name`, `description`, `user-invocable: false` (default for slash-only skills), `allowed-tools`.
+2. **Slash command** at `plugins/flow-next/commands/flow-next/<name>.md` (mirror existing `audit.md` / `prospect.md` shape).
+3. **Tool names in canonical = Claude-native** — write `AskUserQuestion`, `Task`, etc. directly. NO inline cross-platform tables. If you reference these tools, optionally add a parenthetical "(sync-codex.sh rewrites to `request_user_input` for Codex)" for maintainer clarity — sync strips it from the Codex mirror.
+4. **`scripts/sync-codex.sh` `generate_openai_yaml` call** added in the appropriate section (workflow blue `#3B82F6`, review red `#EF4444`, utility amber `#F59E0B`). Include display name, short description, brand color, explicit `false` for `allow_implicit_invocation`, optional default prompt.
+5. **`scripts/sync-codex.sh` `REQUIRED_OPENAI_YAML_SKILLS` array** updated to include the new skill name. Validation will fail otherwise.
+6. **Run `./scripts/sync-codex.sh`** — verify zero errors, all REQUIRED skills have `agents/openai.yaml`, and the Codex mirror has the rewritten tool names (`request_user_input`, etc.). Commit the regenerated `plugins/flow-next/codex/` directory.
+7. **Commands list** updated in:
+   - `CLAUDE.md` line ~19-27 (Plugins > Commands)
+   - `plugins/flow-next/README.md` (skills/commands table + count)
+   - `~/work/mickel.tech/app/apps/flow-next/page.tsx` (commands array + lede count + FAQ if applicable) — **maintainer-only; external contributors skip per "Contributing / Development" section**
+8. **CHANGELOG entry** under the appropriate `[flow-next X.Y.Z]` block describing what the skill does.
+9. **Smoke test** if the skill has any flowctl plumbing (atomic file writes, schema additions). Pure-skill additions (markdown-only) get verified by manual invocation in a real session.
+
+Reference: this checklist captures the lessons from the 0.34.0 → 0.37.0 era when (a) 4 user-facing skills (resolve-pr, prospect, audit, memory-migrate) silently shipped to Codex without UI metadata, and (b) several skills shipped with inline cross-platform tables (`AskUserQuestion` / `request_user_input` / `ask_user`) that polluted the agent's context. Both fixed in 0.37.1. Don't repeat them.
 
 ## Agent workflow (Ralph + RP)
 
@@ -216,6 +402,21 @@ claude plugins uninstall flow
 
 Global installs take precedence over `--plugin-dir`, causing tests to use stale cached versions instead of your local changes.
 
+### What's in scope for a PR vs. maintainer-only
+
+When planning an epic or opening a PR, include doc updates as acceptance criteria:
+
+- **In scope for any contributor (always):**
+  - `CHANGELOG.md` — new entry under the relevant version block
+  - `plugins/<plugin>/README.md` — relevant sections + commands/skills tables
+  - `CLAUDE.md` — feature description in the relevant subsection
+  - `.flow/usage.md` — when listed commands change
+
+- **Maintainer-only (Gordon handles post-merge):**
+  - `~/work/mickel.tech/app/apps/flow-next/page.tsx` — feature card on the public marketing site. External contributors **do not** need to update this; lives in a separate private repo. PRs from non-maintainers should skip the website task entirely; Gordon adds the corresponding feature card during release.
+
+Skip rules: pure internal refactors with no user-visible surface skip README + website; bug fixes with no doc impact get a CHANGELOG entry only. When in doubt, include the doc update.
+
 ## Repo metadata
 - Author: Gordon Mickel (gordon@mickel.tech)
 - Homepage: https://mickel.tech
@@ -223,64 +424,63 @@ Global installs take precedence over `--plugin-dir`, causing tests to use stale 
 
 ## Codex Installation
 
-Flow-Next is a native Codex plugin. Two install methods:
+Single install path: clone the repo + run `install-codex.sh`. The script is idempotent — re-run on every update.
 
-**Option A — Native plugin** (recommended):
 ```bash
 git clone https://github.com/gmickel/flow-next.git
 cd flow-next
-codex  # → /plugins → install Flow-Next
+./scripts/install-codex.sh flow-next
 ```
 
-Then run `$flow-next-setup` in your project.
+Update path: `cd flow-next && git pull && ./scripts/install-codex.sh flow-next`.
 
-**Option B — Global install** (copies to `~/.codex/`):
-```bash
-git clone --depth 1 https://github.com/gmickel/flow-next.git /tmp/flow-next-install \
-  && /tmp/flow-next-install/scripts/install-codex.sh flow-next
-```
+**Why not Codex's `/plugins` install?** Codex's plugin protocol (as of 2026-04-25) only registers `skills` declared in `plugin.json` — there's no `agents`, `hooks`, or `commands` field in the manifest schema. Verified empirically: both paths (`cd flow-next && codex` → `/plugins` install via local marketplace, AND `codex plugin marketplace add gmickel/flow-next` → `/plugins` install via git source) write `[plugins."flow-next@flow-next-marketplace"] enabled = true` and resolve skills via `"skills": "./codex/skills/"`, but neither merges `[agents.*]` or `[hooks.*]` entries into `~/.codex/config.toml`. That breaks subagent isolation (worker model tier, `disallowed_tools` enforcement) and Ralph hooks. The script writes those entries directly. **Recheck on every Codex changelog bump that mentions plugin manifest fields or app-server plugin management** — once `agents` + `hooks` land in the schema, drop the script and document `codex plugin marketplace add gmickel/flow-next` instead.
 
-**What gets installed (global):**
+**What gets installed:**
 - `~/.codex/scripts/flowctl` + `flowctl.py` — CLI tool
-- `~/.codex/skills/` — Skill definitions (patched for Codex paths)
-- `~/.codex/agents/*.toml` — Multi-agent role configs (20 roles)
-- `~/.codex/config.toml` — Agent entries merged (descriptions + config_file refs)
-- `~/.codex/prompts/` — Command prompts
-- `~/.codex/scripts/` — Helper scripts (worktree.sh)
-- `~/.codex/templates/` — Ralph/setup templates
+- `~/.codex/skills/` — 21 skill definitions
+- `~/.codex/agents/*.toml` — 21 multi-agent role configs
+- `~/.codex/hooks.json` — Ralph guard hooks
+- `~/.codex/prompts/` — 16 command prompts
+- `~/.codex/templates/` — Ralph init templates
+- `~/.codex/config.toml` — `multi_agent = true`, `[features].codex_hooks = true` merged into existing `[features]` block, `[agents.*]` entries appended (between markers `# --- flow-next multi-agent roles (auto-generated) ---` and `# --- end flow-next roles ---`)
 
 **Native plugin structure:**
 - `.codex-plugin/plugin.json` — Codex plugin manifest
 - `.agents/plugins/marketplace.json` — Codex marketplace discovery
 - `plugins/flow-next/codex/` — Pre-built agents, skills, hooks (generated by `scripts/sync-codex.sh`)
 
-**Model mapping (3-tier):**
+**Model mapping (3-tier with per-agent reasoning override):**
 
-| Claude Code | Codex | Agents |
-|-------------|-------|--------|
-| `opus` | `gpt-5.4` (reasoning: high) | quality-auditor, flow-gap-analyst, context-scout |
-| `claude-sonnet-4-6` (smart) | `gpt-5.4` (reasoning: high) | epic-scout, agents-md-scout, docs-gap-scout |
-| `claude-sonnet-4-6` (fast) | `gpt-5.4-mini` | build-scout, env-scout, testing-scout, tooling-scout, observability-scout, security-scout, workflow-scout, memory-scout |
-| `inherit` | inherited from parent | worker, plan-sync |
+| Claude Code | Codex | Reasoning effort | Agents |
+|-------------|-------|------------------|--------|
+| `opus` (review-shaped) | `gpt-5.5` | `high` | quality-auditor |
+| `opus` (scout/editorial) | `gpt-5.5` | `medium` | flow-gap-analyst, context-scout, docs-scout, github-scout, practice-scout, repo-scout, plan-sync |
+| `claude-sonnet-4-6` (smart) | `gpt-5.5` | `medium` | epic-scout, agents-md-scout, docs-gap-scout |
+| `claude-sonnet-4-6` (fast) | `gpt-5.4-mini` | n/a (mini doesn't support reasoning) | build-scout, env-scout, testing-scout, tooling-scout, observability-scout, security-scout, workflow-scout, memory-scout |
+| `inherit` | inherited from parent | inherited | worker, pr-comment-resolver |
 
-Override defaults (global install):
+`quality-auditor` is the lone intelligent agent kept at `high` because it's a review-shaped second pair of eyes on uncommitted changes — undershooting risks missed regressions. All other intelligent subagents (scouts + editorial) drop to `medium`; the actual review backend (`flowctl impl-review` / `plan-review` / `completion-review`) stays at `gpt-5.5:high` independently in `flowctl.py`.
+
+Override defaults:
 ```bash
-CODEX_MODEL_INTELLIGENT=gpt-5.4 \
+CODEX_MODEL_INTELLIGENT=gpt-5.5 \
 CODEX_MODEL_FAST=gpt-5.4-mini \
-CODEX_REASONING_EFFORT=high \
+CODEX_REASONING_EFFORT=medium \
+CODEX_REASONING_EFFORT_AUDITOR=high \
 CODEX_MAX_THREADS=12 \
 ./scripts/install-codex.sh flow-next
 ```
 
-**Hooks (experimental):** Codex now supports hooks. Pre-built `codex/hooks.json` includes Ralph guard for `Bash|Execute` + `Stop`. Limitation: hooks only intercept Bash (not Edit/Write), no `SubagentStop`.
+**Hooks:** Pre-built `codex/hooks.json` includes Ralph guard for `Bash|Execute` + `Stop` (enabled via `[features].codex_hooks = true` merged by the install script). Limitation: hooks only intercept Bash (not Edit/Write), no `SubagentStop`.
 
 **Usage in Codex:**
 ```bash
-# Native plugin: commands use $ prefix
-$flow-next-plan Add a contact form
-$flow-next-work fn-1
+# Skills are invocable two ways after install:
+$flow-next-plan Add a contact form        # via $ dropdown (skill UI)
+/flow-next:plan Add a contact form         # via slash command (prompts/)
 
-# Global install: add to PATH
+# flowctl on PATH (optional):
 export PATH="$HOME/.codex/scripts:$PATH"
 ~/.codex/scripts/flowctl --help
 ```
@@ -304,6 +504,10 @@ This project uses Flow-Next for task tracking. Use `.flow/bin/flowctl` instead o
 **Creating a spec** ("create a spec", "spec out X", "write a spec for X"):
 
 A spec = an epic. Create one directly — do NOT use `/flow-next:plan` (that breaks specs into tasks).
+
+**Two paths:**
+- **Automated** (recommended for any spec emerging from conversation): `/flow-next:capture` — host agent synthesizes the spec from conversation context, source-tags every acceptance criterion (`[user]` / `[paraphrase]` / `[inferred]`), and shows the full draft via mandatory read-back before writing. Output goes to the same `.flow/specs/<epic-id>.md` location, via the same `flowctl epic create + epic set-plan` plumbing — but with conversation context preserved as `## Conversation Evidence` and an audit trail of which criteria came from the user. Added in 0.38.0.
+- **Manual** (for direct flowctl scripting): the `flowctl epic create + epic set-plan` heredoc shown below.
 
 ```bash
 .flow/bin/flowctl epic create --title "Short title" --json
@@ -337,6 +541,7 @@ EOF
 After creating a spec, choose next step:
 - `/flow-next:plan <epic-id>` — research + break into tasks
 - `/flow-next:interview <epic-id>` — deep Q&A to refine the spec
+- `/flow-next:capture --rewrite <epic-id>` — re-synthesize from updated conversation context
 
 **Rules:**
 - Use `.flow/bin/flowctl` for ALL task tracking

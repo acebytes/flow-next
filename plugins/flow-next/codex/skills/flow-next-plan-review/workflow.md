@@ -11,11 +11,11 @@
 2. **`chat-send` takes 2-10 MINUTES** - It waits for the LLM to generate a full review. This is NORMAL. Do NOT assume it is stuck.
 
 3. **Run commands directly and WAIT** - Do NOT use background jobs. Just run the command and wait:
-   ```bash
-   # Run setup-review - takes 5-15 minutes, just wait
-   $FLOWCTL rp setup-review --repo-root "$REPO_ROOT" --summary "..."
-   # You will see file paths printed as it indexes - this is progress, not errors
-   ```
+ ```bash
+ # Run setup-review - takes 5-15 minutes, just wait
+ $FLOWCTL rp setup-review --repo-root "$REPO_ROOT" --summary "..."
+ # You will see file paths printed as it indexes - this is progress, not errors
+ ```
 
 4. **Output is progress, not errors** - The context builder prints file paths as it indexes. Seeing many lines of output is NORMAL. Do not interpret this as an error loop.
 
@@ -27,10 +27,9 @@
 
 ---
 
-
 ## Philosophy
 
-The reviewer model only sees selected files. RepoPrompt's Builder discovers context you'd miss (rp backend). Codex uses context hints from flowctl (codex backend).
+The reviewer model only sees selected files. RepoPrompt's Builder discovers context you'd miss (rp backend). Codex and Copilot use context hints from flowctl (codex/copilot backends).
 
 ---
 
@@ -47,16 +46,29 @@ FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$HOME/.codex}}/scripts/flowc
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
 # Priority: --review flag > env > config (flag parsed in SKILL.md)
+# Text output is bare backend name for back-compat grep. --json returns full
+# resolved spec (backend, spec, model, effort, source).
 BACKEND=$($FLOWCTL review-backend)
 
 if [[ "$BACKEND" == "ASK" ]]; then
-  echo "Error: No review backend configured."
-  echo "Run /flow-next:setup to configure, or pass --review=rp|codex|none"
-  exit 1
+ echo "Error: No review backend configured."
+ echo "Run /flow-next:setup to configure, or pass --review=rp|codex|copilot|none"
+ exit 1
 fi
 
-echo "Review backend: $BACKEND (override: --review=rp|codex|none)"
+echo "Review backend: $BACKEND (override: --review=rp|codex|copilot|none)"
 ```
+
+**Spec-form env var (optional):** `FLOW_REVIEW_BACKEND` accepts bare or full spec:
+
+```bash
+FLOW_REVIEW_BACKEND=codex:gpt-5.5:xhigh $FLOWCTL codex plan-review "$EPIC_ID" --receipt "$RECEIPT_PATH"
+FLOW_REVIEW_BACKEND=copilot:claude-opus-4.5 $FLOWCTL copilot plan-review "$EPIC_ID" --receipt "$RECEIPT_PATH"
+# Or pass spec directly:
+$FLOWCTL codex plan-review "$EPIC_ID" --spec "codex:gpt-5.5:xhigh" --receipt "$RECEIPT_PATH"
+```
+
+Per-epic `default_review` (set via `flowctl epic set-backend`) overrides env.
 
 **If backend is "none"**: Skip review, inform user, and exit cleanly (no error).
 
@@ -84,7 +96,7 @@ RECEIPT_PATH="${REVIEW_RECEIPT_PATH:-/tmp/plan-review-receipt.json}"
 # --files: comma-separated CODE files for reviewer context
 # Epic/task specs are auto-included; pass files the plan will CREATE or MODIFY
 # Read epic spec to identify affected paths, then list key files
-CODE_FILES="src/main.py,src/config.py"  # Customize per epic
+CODE_FILES="src/main.py,src/config.py" # Customize per epic
 
 $FLOWCTL codex plan-review "$EPIC_ID" --files "$CODE_FILES" --receipt "$RECEIPT_PATH"
 ```
@@ -112,6 +124,66 @@ If `VERDICT=NEEDS_WORK`:
 
 Receipt is written automatically by `flowctl codex plan-review` when `--receipt` provided.
 Format: `{"mode":"codex","epic":"<id>","verdict":"<verdict>","session_id":"<thread_id>","timestamp":"..."}`
+
+---
+
+## Copilot Backend Workflow
+
+Use when `BACKEND="copilot"`.
+
+### Step 0: Save Checkpoint
+
+**Before review** (protects against context compaction):
+```bash
+EPIC_ID="${1:-}"
+$FLOWCTL checkpoint save --epic "$EPIC_ID" --json
+```
+
+### Step 1: Execute Review
+
+```bash
+RECEIPT_PATH="${REVIEW_RECEIPT_PATH:-/tmp/plan-review-receipt.json}"
+
+# --files: comma-separated CODE files for reviewer context
+# Epic/task specs are auto-included; pass files the plan will CREATE or MODIFY
+CODE_FILES="src/main.py,src/config.py" # Customize per epic
+
+# Runtime config:
+# --spec <spec> full spec (backend:model:effort), highest priority
+# FLOW_REVIEW_BACKEND spec-form ok: copilot:claude-opus-4.5:xhigh
+# FLOW_COPILOT_MODEL fills missing model only (default gpt-5.2)
+# FLOW_COPILOT_EFFORT fills missing effort only (default high)
+
+$FLOWCTL copilot plan-review "$EPIC_ID" --files "$CODE_FILES" --receipt "$RECEIPT_PATH"
+```
+
+**Output includes `VERDICT=SHIP|NEEDS_WORK|MAJOR_RETHINK`.**
+
+### Step 2: Update Status
+
+```bash
+# Based on verdict
+$FLOWCTL epic set-plan-review-status "$EPIC_ID" --status ship --json
+# OR
+$FLOWCTL epic set-plan-review-status "$EPIC_ID" --status needs_work --json
+```
+
+### Step 3: Handle Verdict
+
+If `VERDICT=NEEDS_WORK`:
+1. Parse issues from output
+2. Fix plan via `$FLOWCTL epic set-plan`
+3. Re-run step 1 (receipt enables session continuity when `mode == "copilot"`)
+4. Repeat until SHIP
+
+### Step 4: Receipt
+
+Receipt is written automatically by `flowctl copilot plan-review` when `--receipt` provided.
+Format: `{"type":"plan_review","id":"<epic-id>","mode":"copilot","verdict":"<verdict>","session_id":"<uuid>","model":"<model>","effort":"<effort>","spec":"copilot:<model>:<effort>","timestamp":"..."}`
+
+The `spec` field is the canonical round-trippable form (added in fn-28.3). `model` + `effort` remain for backward compatibility.
+
+Session resume guard: re-review only resumes the copilot session when the existing receipt at `$RECEIPT_PATH` has `mode == "copilot"`. Cross-backend switches start a fresh session.
 
 ---
 
@@ -149,8 +221,8 @@ eval "$($FLOWCTL rp setup-review --repo-root "$REPO_ROOT" --summary "$REVIEW_SUM
 
 # Verify we have W and T
 if [[ -z "${W:-}" || -z "${T:-}" ]]; then
-  echo "<promise>RETRY</promise>"
-  exit 0
+ echo "<promise>RETRY</promise>"
+ exit 0
 fi
 
 echo "Setup complete: W=$W T=$T"
@@ -174,7 +246,7 @@ $FLOWCTL rp select-add --window "$W" --tab "$T" .flow/specs/<epic-id>.md
 
 # Always add ALL task specs for this epic
 for task_spec in .flow/tasks/${EPIC_ID}.*.md; do
-  [[ -f "$task_spec" ]] && $FLOWCTL rp select-add --window "$W" --tab "$T" "$task_spec"
+ [[ -f "$task_spec" ]] && $FLOWCTL rp select-add --window "$W" --tab "$T" "$task_spec"
 done
 
 # Add PRD/architecture docs if found
@@ -242,6 +314,25 @@ Conduct a John Carmack-level review:
 9. **Testability** - How will we verify this works?
 10. **Consistency** - Do task specs align with epic spec?
 
+## Protected artifacts
+
+The following paths are flow-next / project-pipeline artifacts. Any finding recommending their deletion, gitignore, or removal MUST be discarded during synthesis. Do not flag these paths for cleanup under any circumstances:
+
+- `.flow/*` — flow-next state, specs, tasks, epics, runtime
+- `.flow/bin/*` — bundled flowctl
+- `.flow/memory/*` — learnings store (pitfalls, conventions, decisions)
+- `.flow/specs/*.md` — epic specs (decision artifacts)
+- `.flow/tasks/*.md` — task specs (decision artifacts)
+- `docs/plans/*` — plan artifacts (if project uses this convention)
+- `docs/solutions/*` — solutions artifacts (if project uses this convention)
+- `scripts/ralph/*` — Ralph harness (when present)
+
+These files are intentionally committed. They are the pipeline's state, not clutter. An agent that deletes them destroys the project's planning trail and breaks Ralph autonomous runs.
+
+If you notice genuine issues with content INSIDE these files (e.g., a spec that contradicts itself, a stale entry), flag the content — not the file's existence.
+
+**Protected-path filter.** Before emitting findings, scan each for recommendations to delete, gitignore, or `rm -rf` any path matching the protected list above. Drop those findings. If you drop any, report the drop count in a `Protected-path filter:` line in the review output (e.g. `Protected-path filter: dropped 2 findings`). Omit the line when nothing was dropped.
+
 ## Output Format
 
 For each issue:
@@ -249,6 +340,8 @@ For each issue:
 - **Location**: Which task or section (e.g., "fn-1.3 Description" or "Epic Acceptance #2")
 - **Problem**: What's wrong
 - **Suggestion**: How to fix
+
+After the issues list, emit a `Protected-path filter:` line tallying findings dropped by the protected-path filter (omit when nothing was dropped).
 
 **REQUIRED**: You MUST end your response with exactly one verdict tag. This is mandatory:
 `<verdict>SHIP</verdict>` or `<verdict>NEEDS_WORK</verdict>` or `<verdict>MAJOR_RETHINK</verdict>`
@@ -264,15 +357,15 @@ REVIEW_RESPONSE="$($FLOWCTL rp chat-send --window "$W" --tab "$T" --message-file
 echo "$REVIEW_RESPONSE"
 
 VERDICT="$(echo "$REVIEW_RESPONSE" \
-  | tr -d '\r' \
-  | grep -oE '<verdict>(SHIP|NEEDS_WORK|MAJOR_RETHINK)</verdict>' \
-  | tail -n 1 \
-  | sed -E 's#</?verdict>##g')"
+ | tr -d '\r' \
+ | grep -oE '<verdict>(SHIP|NEEDS_WORK|MAJOR_RETHINK)</verdict>' \
+ | tail -n 1 \
+ | sed -E 's#</?verdict>##g')"
 
 if [[ -z "$VERDICT" ]]; then
-  echo "No verdict tag found in response"
-  echo "<promise>RETRY</promise>"
-  exit 0
+ echo "No verdict tag found in response"
+ echo "<promise>RETRY</promise>"
+ exit 0
 fi
 ```
 
@@ -286,12 +379,12 @@ fi
 
 ```bash
 if [[ -n "${REVIEW_RECEIPT_PATH:-}" ]]; then
-  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  mkdir -p "$(dirname "$REVIEW_RECEIPT_PATH")"
-  cat > "$REVIEW_RECEIPT_PATH" <<EOF
+ ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+ mkdir -p "$(dirname "$REVIEW_RECEIPT_PATH")"
+ cat > "$REVIEW_RECEIPT_PATH" <<EOF
 {"type":"plan_review","id":"<EPIC_ID>","mode":"rp","verdict":"$VERDICT","timestamp":"$ts"}
 EOF
-  echo "REVIEW_RECEIPT_WRITTEN: $REVIEW_RECEIPT_PATH"
+ echo "REVIEW_RECEIPT_WRITTEN: $REVIEW_RECEIPT_PATH"
 fi
 ```
 
@@ -311,7 +404,7 @@ If no verdict tag, output `<promise>RETRY</promise>` and stop.
 
 ## Fix Loop (RP)
 
-**CRITICAL: Do NOT ask user for confirmation. Automatically fix ALL valid issues and re-review — our goal is production-grade world-class software and architecture. Never use AskUserQuestion in this loop.**
+**CRITICAL: Do NOT ask user for confirmation. Automatically fix ALL valid issues and re-review — our goal is production-grade world-class software and architecture. Never use request_user_input in this loop.**
 
 **CRITICAL: You MUST fix the plan BEFORE re-reviewing. Never re-review without making changes.**
 
@@ -320,59 +413,59 @@ If verdict is NEEDS_WORK:
 1. **Parse issues** - Extract ALL issues by severity (Critical → Major → Minor)
 2. **Fix the epic spec** - Address each issue.
 3. **Update epic spec in flowctl** (MANDATORY before re-review):
-   ```bash
-   # Option A: stdin heredoc (preferred, no temp file)
-   $FLOWCTL epic set-plan <EPIC_ID> --file - --json <<'EOF'
-   <updated epic spec content>
-   EOF
+ ```bash
+ # Option A: stdin heredoc (preferred, no temp file)
+ $FLOWCTL epic set-plan <EPIC_ID> --file - --json <<'EOF'
+ <updated epic spec content>
+ EOF
 
-   # Option B: temp file (if content has single quotes)
-   $FLOWCTL epic set-plan <EPIC_ID> --file /tmp/updated-plan.md --json
-   ```
-   **If you skip this step and re-review with same content, reviewer will return NEEDS_WORK again.**
+ # Option B: temp file (if content has single quotes)
+ $FLOWCTL epic set-plan <EPIC_ID> --file /tmp/updated-plan.md --json
+ ```
+ **If you skip this step and re-review with same content, reviewer will return NEEDS_WORK again.**
 
-   **Recovery**: If context compaction occurred, restore from checkpoint first:
-   ```bash
-   $FLOWCTL checkpoint restore --epic <EPIC_ID> --json
-   ```
+ **Recovery**: If context compaction occurred, restore from checkpoint first:
+ ```bash
+ $FLOWCTL checkpoint restore --epic <EPIC_ID> --json
+ ```
 
 4. **Sync affected task specs** - If epic changes affect task specs, update them:
-   ```bash
-   $FLOWCTL task set-spec <TASK_ID> --file - --json <<'EOF'
-   <updated task spec content>
-   EOF
-   ```
-   Task specs need updating when epic changes affect:
-   - State/enum values referenced in tasks
-   - Acceptance criteria that tasks implement
-   - Approach/design decisions tasks depend on
-   - Lock/retry/error handling semantics
-   - API signatures or type definitions
+ ```bash
+ $FLOWCTL task set-spec <TASK_ID> --file - --json <<'EOF'
+ <updated task spec content>
+ EOF
+ ```
+ Task specs need updating when epic changes affect:
+ - State/enum values referenced in tasks
+ - Acceptance criteria that tasks implement
+ - Approach/design decisions tasks depend on
+ - Lock/retry/error handling semantics
+ - API signatures or type definitions
 
 5. **Request re-review** (only AFTER steps 3-4):
 
-   **IMPORTANT**: Do NOT re-add files already in the selection. RepoPrompt auto-refreshes
-   file contents on every message. Only use `select-add` for NEW files created during fixes:
-   ```bash
-   # Only if fixes created new files not in original selection
-   if [[ -n "$NEW_FILES" ]]; then
-     $FLOWCTL rp select-add --window "$W" --tab "$T" $NEW_FILES
-   fi
-   ```
+ **IMPORTANT**: Do NOT re-add files already in the selection. RepoPrompt auto-refreshes
+ file contents on every message. Only use `select-add` for NEW files created during fixes:
+ ```bash
+ # Only if fixes created new files not in original selection
+ if [[ -n "$NEW_FILES" ]]; then
+ $FLOWCTL rp select-add --window "$W" --tab "$T" $NEW_FILES
+ fi
+ ```
 
-   Then send re-review request (NO --new-chat, stay in same chat).
+ Then send re-review request (NO --new-chat, stay in same chat).
 
-   **CRITICAL: Do NOT summarize fixes.** RP auto-refreshes file contents - reviewer sees your changes automatically. Just request re-review. Any summary wastes tokens and duplicates what reviewer already sees.
+ **CRITICAL: Do NOT summarize fixes.** RP auto-refreshes file contents - reviewer sees your changes automatically. Just request re-review. Any summary wastes tokens and duplicates what reviewer already sees.
 
-   ```bash
-   cat > /tmp/re-review.md << 'EOF'
-   Issues addressed. Please re-review.
+ ```bash
+ cat > /tmp/re-review.md << 'EOF'
+ Issues addressed. Please re-review.
 
-   **REQUIRED**: End with `<verdict>SHIP</verdict>` or `<verdict>NEEDS_WORK</verdict>` or `<verdict>MAJOR_RETHINK</verdict>`
-   EOF
+ **REQUIRED**: End with `<verdict>SHIP</verdict>` or `<verdict>NEEDS_WORK</verdict>` or `<verdict>MAJOR_RETHINK</verdict>`
+ EOF
 
-   $FLOWCTL rp chat-send --window "$W" --tab "$T" --message-file /tmp/re-review.md
-   ```
+ $FLOWCTL rp chat-send --window "$W" --tab "$T" --message-file /tmp/re-review.md
+ ```
 6. **Repeat** until Ship
 
 **Anti-pattern**: Re-adding already-selected files before re-review. RP auto-refreshes; re-adding can cause issues.
@@ -399,3 +492,9 @@ If verdict is NEEDS_WORK:
 **Codex backend only:**
 - **Using `--last` flag** - Conflicts with parallel usage; use `--receipt` instead
 - **Direct codex calls** - Must use `flowctl codex` wrappers
+
+**Copilot backend only:**
+- **Direct copilot calls** - Must use `flowctl copilot` wrappers
+- **Inventing `--model`/`--effort` CLI flags** - Use `--spec` for a full backend:model:effort value, or `FLOW_COPILOT_MODEL` / `FLOW_COPILOT_EFFORT` env vars to fill individual fields
+- **Using `--continue`** - Conflicts with parallel usage; session resume uses `--resume=<uuid>` under the hood via `--receipt`
+- **Assuming cross-backend session continuity** - Resume only works when prior receipt has `mode == "copilot"`

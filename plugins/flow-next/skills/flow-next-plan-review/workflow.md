@@ -2,7 +2,7 @@
 
 ## Philosophy
 
-The reviewer model only sees selected files. RepoPrompt's Builder discovers context you'd miss (rp backend). Codex uses context hints from flowctl (codex backend).
+The reviewer model only sees selected files. RepoPrompt's Builder discovers context you'd miss (rp backend). Codex and Copilot use context hints from flowctl (codex/copilot backends).
 
 ---
 
@@ -18,16 +18,29 @@ FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/flowctl"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
 # Priority: --review flag > env > config (flag parsed in SKILL.md)
+# Text output is bare backend name for back-compat grep. --json returns full
+# resolved spec (backend, spec, model, effort, source).
 BACKEND=$($FLOWCTL review-backend)
 
 if [[ "$BACKEND" == "ASK" ]]; then
   echo "Error: No review backend configured."
-  echo "Run /flow-next:setup to configure, or pass --review=rp|codex|none"
+  echo "Run /flow-next:setup to configure, or pass --review=rp|codex|copilot|none"
   exit 1
 fi
 
-echo "Review backend: $BACKEND (override: --review=rp|codex|none)"
+echo "Review backend: $BACKEND (override: --review=rp|codex|copilot|none)"
 ```
+
+**Spec-form env var (optional):** `FLOW_REVIEW_BACKEND` accepts bare or full spec:
+
+```bash
+FLOW_REVIEW_BACKEND=codex:gpt-5.5:xhigh $FLOWCTL codex plan-review "$EPIC_ID" --receipt "$RECEIPT_PATH"
+FLOW_REVIEW_BACKEND=copilot:claude-opus-4.5 $FLOWCTL copilot plan-review "$EPIC_ID" --receipt "$RECEIPT_PATH"
+# Or pass spec directly:
+$FLOWCTL codex plan-review "$EPIC_ID" --spec "codex:gpt-5.5:xhigh" --receipt "$RECEIPT_PATH"
+```
+
+Per-epic `default_review` (set via `flowctl epic set-backend`) overrides env.
 
 **If backend is "none"**: Skip review, inform user, and exit cleanly (no error).
 
@@ -83,6 +96,66 @@ If `VERDICT=NEEDS_WORK`:
 
 Receipt is written automatically by `flowctl codex plan-review` when `--receipt` provided.
 Format: `{"mode":"codex","epic":"<id>","verdict":"<verdict>","session_id":"<thread_id>","timestamp":"..."}`
+
+---
+
+## Copilot Backend Workflow
+
+Use when `BACKEND="copilot"`.
+
+### Step 0: Save Checkpoint
+
+**Before review** (protects against context compaction):
+```bash
+EPIC_ID="${1:-}"
+$FLOWCTL checkpoint save --epic "$EPIC_ID" --json
+```
+
+### Step 1: Execute Review
+
+```bash
+RECEIPT_PATH="${REVIEW_RECEIPT_PATH:-/tmp/plan-review-receipt.json}"
+
+# --files: comma-separated CODE files for reviewer context
+# Epic/task specs are auto-included; pass files the plan will CREATE or MODIFY
+CODE_FILES="src/main.py,src/config.py"  # Customize per epic
+
+# Runtime config:
+#   --spec <spec>           full spec (backend:model:effort), highest priority
+#   FLOW_REVIEW_BACKEND     spec-form ok: copilot:claude-opus-4.5:xhigh
+#   FLOW_COPILOT_MODEL      fills missing model only (default gpt-5.2)
+#   FLOW_COPILOT_EFFORT     fills missing effort only (default high)
+
+$FLOWCTL copilot plan-review "$EPIC_ID" --files "$CODE_FILES" --receipt "$RECEIPT_PATH"
+```
+
+**Output includes `VERDICT=SHIP|NEEDS_WORK|MAJOR_RETHINK`.**
+
+### Step 2: Update Status
+
+```bash
+# Based on verdict
+$FLOWCTL epic set-plan-review-status "$EPIC_ID" --status ship --json
+# OR
+$FLOWCTL epic set-plan-review-status "$EPIC_ID" --status needs_work --json
+```
+
+### Step 3: Handle Verdict
+
+If `VERDICT=NEEDS_WORK`:
+1. Parse issues from output
+2. Fix plan via `$FLOWCTL epic set-plan`
+3. Re-run step 1 (receipt enables session continuity when `mode == "copilot"`)
+4. Repeat until SHIP
+
+### Step 4: Receipt
+
+Receipt is written automatically by `flowctl copilot plan-review` when `--receipt` provided.
+Format: `{"type":"plan_review","id":"<epic-id>","mode":"copilot","verdict":"<verdict>","session_id":"<uuid>","model":"<model>","effort":"<effort>","spec":"copilot:<model>:<effort>","timestamp":"..."}`
+
+The `spec` field is the canonical round-trippable form (added in fn-28.3). `model` + `effort` remain for backward compatibility.
+
+Session resume guard: re-review only resumes the copilot session when the existing receipt at `$RECEIPT_PATH` has `mode == "copilot"`. Cross-backend switches start a fresh session.
 
 ---
 
@@ -213,6 +286,25 @@ Conduct a John Carmack-level review:
 9. **Testability** - How will we verify this works?
 10. **Consistency** - Do task specs align with epic spec?
 
+## Protected artifacts
+
+The following paths are flow-next / project-pipeline artifacts. Any finding recommending their deletion, gitignore, or removal MUST be discarded during synthesis. Do not flag these paths for cleanup under any circumstances:
+
+- `.flow/*` — flow-next state, specs, tasks, epics, runtime
+- `.flow/bin/*` — bundled flowctl
+- `.flow/memory/*` — learnings store (pitfalls, conventions, decisions)
+- `.flow/specs/*.md` — epic specs (decision artifacts)
+- `.flow/tasks/*.md` — task specs (decision artifacts)
+- `docs/plans/*` — plan artifacts (if project uses this convention)
+- `docs/solutions/*` — solutions artifacts (if project uses this convention)
+- `scripts/ralph/*` — Ralph harness (when present)
+
+These files are intentionally committed. They are the pipeline's state, not clutter. An agent that deletes them destroys the project's planning trail and breaks Ralph autonomous runs.
+
+If you notice genuine issues with content INSIDE these files (e.g., a spec that contradicts itself, a stale entry), flag the content — not the file's existence.
+
+**Protected-path filter.** Before emitting findings, scan each for recommendations to delete, gitignore, or `rm -rf` any path matching the protected list above. Drop those findings. If you drop any, report the drop count in a `Protected-path filter:` line in the review output (e.g. `Protected-path filter: dropped 2 findings`). Omit the line when nothing was dropped.
+
 ## Output Format
 
 For each issue:
@@ -220,6 +312,8 @@ For each issue:
 - **Location**: Which task or section (e.g., "fn-1.3 Description" or "Epic Acceptance #2")
 - **Problem**: What's wrong
 - **Suggestion**: How to fix
+
+After the issues list, emit a `Protected-path filter:` line tallying findings dropped by the protected-path filter (omit when nothing was dropped).
 
 **REQUIRED**: You MUST end your response with exactly one verdict tag. This is mandatory:
 `<verdict>SHIP</verdict>` or `<verdict>NEEDS_WORK</verdict>` or `<verdict>MAJOR_RETHINK</verdict>`
@@ -370,3 +464,9 @@ If verdict is NEEDS_WORK:
 **Codex backend only:**
 - **Using `--last` flag** - Conflicts with parallel usage; use `--receipt` instead
 - **Direct codex calls** - Must use `flowctl codex` wrappers
+
+**Copilot backend only:**
+- **Direct copilot calls** - Must use `flowctl copilot` wrappers
+- **Inventing `--model`/`--effort` CLI flags** - Use `--spec` for a full backend:model:effort value, or `FLOW_COPILOT_MODEL` / `FLOW_COPILOT_EFFORT` env vars to fill individual fields
+- **Using `--continue`** - Conflicts with parallel usage; session resume uses `--resume=<uuid>` under the hood via `--receipt`
+- **Assuming cross-backend session continuity** - Resume only works when prior receipt has `mode == "copilot"`

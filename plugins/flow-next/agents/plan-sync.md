@@ -17,6 +17,9 @@ You synchronize downstream task specs after implementation drift.
 - `DOWNSTREAM_TASK_IDS` - comma-separated list of remaining tasks
 - `DRY_RUN` - "true" or "false" (optional, defaults to false)
 - `CROSS_EPIC` - "true" or "false" (from config planSync.crossEpic, defaults to false)
+- `GLOSSARY_JSON` - output of `flowctl glossary list --json` (optional; defaults to `{"groups":[],"file_count":0,"total_terms":0}` when the project has no glossary)
+- `DECISIONS_JSON` - output of `flowctl memory list --track knowledge --category decisions --json` (optional; defaults to `{"entries":[],"count":0}` when no decision entries exist)
+- `STRATEGY_CONTENT` - output of `flowctl strategy read --json` (optional; defaults to `{}` when no STRATEGY.md exists or all sections are empty). `tracks` is a raw markdown string with `### <track-name>` H3 sub-blocks. Empty section bodies surface as `""` (empty string), not null.
 
 ## Phase 1: Re-anchor on Completed Task
 
@@ -66,6 +69,79 @@ Compare spec vs implementation:
 
 Drift exists if implementation differs from spec in ways that downstream tasks reference.
 
+## Phase 3b: Glossary renames + decision overrides + strategy drift
+
+Three extra signal types layer on top of the variable/API drift in Phase 3. All are sourced from the input prompt — no extra flowctl calls required.
+
+**Husk short-circuit:** when ALL three of the following hold, skip the entire Phase 3b section — there is no project-anchor signal to align to:
+
+- `GLOSSARY_JSON.total_terms == 0` (glossary is missing or husk)
+- `DECISIONS_JSON.count == 0` (no decision entries)
+- `STRATEGY_CONTENT.sections_filled == 0` OR `STRATEGY_CONTENT == {}` (no STRATEGY.md or husk; check the parsed JSON for any populated section body — `target_problem`, `approach`, `tracks`, `personas`, or `metrics`)
+
+When ANY of the three has signal, run the corresponding subsection (3b.1 / 3b.2 / 3b.3) and skip the others. Husk-vs-presence rule: presence of the file alone is not signal — populated sections are.
+
+### 3b.1 — Glossary-term renames
+
+Skip this section when `GLOSSARY_JSON.file_count == 0` OR `GLOSSARY_JSON.total_terms == 0` (every group is a husk; no signal). Otherwise iterate `groups[].entries[]`:
+
+For each entry with at least one `avoid` alias:
+1. Search the **completed task spec** and the **epic spec** for any `avoid` alias (case-insensitive, whole-word). Use the same matching rule as flowctl's `_glossary_term_matches`: lowercase + collapse runs of whitespace to a single space, then compare. The host agent's Grep tool with `-i` and `\b` anchors is equivalent.
+2. Search the **actual code touched by the completed task** (files in `evidence.commits` from Phase 1) for the canonical `term`.
+3. If the alias appears in old spec text AND the canonical term appears in new code, the term has been renamed in flight. Flag the downstream task specs for update — they likely still reference the alias.
+
+Example:
+- `GLOSSARY_JSON` entry: `{"term": "feedback loop", "avoid": ["polling cycle", "tick"]}`
+- Old spec text: "...starts a new polling cycle..."
+- New code (from completed task): `def run_feedback_loop(...)`
+- Action: in Phase 5, update downstream specs that say "polling cycle" to say "feedback loop"; add a `<!-- Updated by plan-sync: glossary rename polling cycle → feedback loop -->` breadcrumb.
+
+When the canonical term appears in old spec text already, no rename — skip.
+
+### 3b.2 — Decision overrides
+
+Skip when `DECISIONS_JSON.count == 0`. Otherwise iterate `DECISIONS_JSON.entries[]`:
+
+For each entry where `decision_status` is `accepted` (or absent — treat as accepted):
+1. Read the entry body (`flowctl memory read <entry_id>`) and locate the `## Consequences` section if present.
+2. Extract any file paths, module names, or API names referenced under `Consequences`. The agent reads the prose directly — no regex extraction is required; the goal is to find concrete code references the decision committed to.
+3. Cross-check against the actual code touched by the completed task (files from `evidence.commits`). If the completed task modifies a file the decision named, AND the change appears to contradict the decision's stated direction (e.g. decision says "we use REST" + new code adds a `/graphql` endpoint), surface the decision id in the report.
+
+**Do not auto-supersede.** Do not Edit the decision entry. Do not write a successor. The agent's job here is signal-surface only — list decision ids that need human review in the Phase 6 summary under a `Decision overrides flagged for review` heading. The user (or `/flow-next:audit`) decides whether to supersede.
+
+Skip entries with `decision_status: superseded` — historical record, not active constraint.
+
+When the `Consequences` section is missing or names no concrete code references, skip the entry — there's nothing to cross-check.
+
+### 3b.3 — Strategy drift
+
+Skip when `STRATEGY_CONTENT == {}` OR every section body in `STRATEGY_CONTENT` is `""` / null (husk semantics — no populated section to align to). Otherwise:
+
+1. Read the active tracks from `STRATEGY_CONTENT.tracks` — a **raw markdown string** with `### <track-name>` H3 sub-blocks. Parse the H3 names. Empty section bodies surface as `""` (empty string), not null. Use a literal H3 grep pattern on the raw string:
+   ```
+   ^### (.+)$
+   ```
+   Each capture group is an active track name.
+2. Read the verbatim `STRATEGY_CONTENT.approach` line (one or two sentences).
+3. For each active track, scan the **completed task spec** and the **actual code touched by the completed task** for evidence that the implementation contradicts the track body. Examples:
+   - Track `### CLI-only` says "we ship CLI tools, not SaaS"; completed task adds a hosted endpoint at `src/server/dashboard.ts` — contradicts.
+   - Approach says "OSS-tools repo, no commercial SaaS"; completed task adds `stripe` dependency to `package.json` — contradicts.
+4. Track-rename detection: when the **completed task spec** or **epic spec** references a track-name pattern (`### <name>` H3 in prior file content) absent from the current `STRATEGY_CONTENT.tracks`, treat as a rename candidate. Match against the historical pattern using a literal H3 grep on the same form. Map old → new by closest semantic match (1:1 when possible; otherwise surface as drift).
+
+**On contradiction detected:** surface in the Phase 6 summary under a `## Strategy drift flagged for review` heading. Format mirrors the `Decision overrides flagged for review` block exactly — bulleted list with track citation + completed-task divergence + a `Review and run /flow-next:strategy if intended.` line per item.
+
+**On track-rename detected:** in Phase 5, replace the alias inline with the canonical track name and a breadcrumb. Pattern mirrors the existing glossary rename plumbing (Phase 5 Edit step):
+
+```
+<canonical-track-name> <!-- Updated by plan-sync: track rename from "<old-name>" -->
+```
+
+The breadcrumb names the old and canonical track names. The replacement happens in `.flow/specs/<id>.md` and `.flow/tasks/<id>.md` only — never in `STRATEGY.md`.
+
+**Do not auto-supersede.** Do not Edit `STRATEGY.md`. Do not write a successor. The agent's job here is signal-surface only — list track names that need human review in the Phase 6 summary. The user (or `/flow-next:strategy`) decides whether to revise the strategy doc.
+
+When `STRATEGY_CONTENT` has no `tracks` field (or `tracks == ""`), skip the track-iteration step but still scan against `approach` for the contradiction check. When both are empty, skip the section entirely.
+
 ## Phase 4: Check Downstream Tasks
 
 For each task in DOWNSTREAM_TASK_IDS:
@@ -78,6 +154,7 @@ Look for references to:
 - Names/APIs from completed task spec (now stale)
 - Assumptions about data structures
 - Integration points that changed
+- Glossary `_Avoid_` aliases flagged in Phase 3b.1 (downstream spec uses the alias; canonical term should land instead)
 
 Flag tasks that need updates.
 
@@ -127,7 +204,11 @@ Changes should:
 - Update variable/function names to match actual
 - Correct API signatures
 - Fix data structure assumptions
+- Replace glossary aliases (Phase 3b.1) with the canonical term; preserve surrounding prose
+- Replace strategy track aliases (Phase 3b.3) with the canonical track name; preserve surrounding prose
 - Add note: `<!-- Updated by plan-sync: fn-X.Y used <actual> not <planned> -->`
+- For glossary renames, the breadcrumb names the alias and canonical term: `<!-- Updated by plan-sync: glossary rename <alias> → <term> -->`
+- For strategy track renames, the breadcrumb names the old and canonical track names: `<!-- Updated by plan-sync: track rename from "<old-name>" -->`
 
 **DO NOT:**
 - Change task scope or requirements
@@ -166,9 +247,16 @@ Drift detected: yes
 Would update (DRY RUN):
 - fn-1.3: Change references from `UserAuth.login()` to `authService.authenticate()`
 - fn-1.4: Update expected return type from `boolean` to `AuthResult`
+- fn-1.5: Replace glossary alias "polling cycle" with canonical "feedback loop"
 
 Would update traceability:  # Only if table exists
 - R2 (Session persistence): would add fn-1.4 coverage (API changed from fn-1.2)
+
+Decision overrides flagged for review:  # Only if DECISIONS_JSON had entries with overrides
+- knowledge/decisions/use-rest-not-graphql-2026-03-12: completed task added `/graphql` endpoint in src/api/router.ts; review for supersession.
+
+## Strategy drift flagged for review  # Only if STRATEGY_CONTENT has populated sections AND a contradiction was detected
+- **CLI-only** (STRATEGY.md): completed task added hosted endpoint in src/server/dashboard.ts. Review and run /flow-next:strategy if intended.
 
 No files modified.
 ```
@@ -182,13 +270,24 @@ Drift detected: yes
 Updated tasks (same epic):
 - fn-1.3: Changed references from `UserAuth.login()` to `authService.authenticate()`
 - fn-1.4: Updated expected return type from `boolean` to `AuthResult`
+- fn-1.5: Replaced glossary alias "polling cycle" with canonical "feedback loop"
 
 Updated tasks (cross-epic):  # Only if CROSS_EPIC enabled and found
 - fn-3.2: Updated authService import path
 
 Updated traceability:  # Only if table exists and rows affected
 - R2 (Session persistence): removed fn-1.2 coverage (API changed), now needs fn-1.4
+
+Decision overrides flagged for review:  # Only if DECISIONS_JSON had entries with overrides
+- knowledge/decisions/use-rest-not-graphql-2026-03-12: completed task added `/graphql` endpoint in src/api/router.ts; review for supersession.
+
+## Strategy drift flagged for review  # Only if STRATEGY_CONTENT has populated sections AND a contradiction was detected
+- **CLI-only** (STRATEGY.md): completed task added hosted endpoint in src/server/dashboard.ts. Review and run /flow-next:strategy if intended.
 ```
+
+**Decision overrides are surfaced, not auto-resolved.** The agent never edits the decision entry, never writes a successor, never marks anything superseded. The user (or `/flow-next:audit`) handles supersession.
+
+**Strategy drift is surfaced, not auto-resolved.** The agent never edits `STRATEGY.md`, never marks a track superseded, never auto-rewrites the doc. The user (or `/flow-next:strategy`) decides whether to revise. Track renames in spec bodies (Phase 5 inline replacement with breadcrumb) are the only auto-edit related to strategy — `STRATEGY.md` itself is read-only from this agent's perspective.
 
 ## Rules
 
@@ -197,3 +296,16 @@ Updated traceability:  # Only if table exists and rows affected
 - **Preserve intent** - Update references, not requirements
 - **Minimal changes** - Only fix stale references, don't rewrite specs
 - **Skip if no drift** - Return quickly if implementation matches spec
+- **Glossary entries are read-only** - never Edit `GLOSSARY.md` files; the agent only consumes the JSON
+- **Decision entries are read-only** - never Edit `.flow/memory/knowledge/decisions/*.md`; surface overrides for human review
+- **STRATEGY.md is read-only** - never Edit `STRATEGY.md`; the agent only consumes the JSON. Track-rename inline replacement happens in `.flow/specs/*.md` / `.flow/tasks/*.md` (with breadcrumb), never in the strategy doc itself
+
+## R-ID preservation (MANDATORY)
+
+When syncing drift between spec and implementation:
+
+- **Never renumber existing R-IDs** in the epic spec's `## Acceptance` section or `## Requirement coverage` table. Stable IDs are the whole point — renumbering silently breaks review receipts and prior verdicts.
+- **New acceptance criteria take the next unused number.** If the spec has `R1, R2, R4` (R3 deleted), a new criterion becomes `R5` — respect the gap, do not compact.
+- **If an acceptance criterion is deleted, leave the gap.** Do not shift `R4` down to `R3`.
+- **When updating task specs, populate `satisfies: [R1, R3]` frontmatter** if the drift clearly advances specific R-IDs. If the task already has `satisfies`, preserve existing entries and only add/remove when drift clearly warrants it.
+- **Never add `satisfies` to infrastructure/refactor/plumbing tasks** unless the drift genuinely changes what the task covers.

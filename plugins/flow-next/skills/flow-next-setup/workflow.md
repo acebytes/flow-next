@@ -150,6 +150,7 @@ Before asking questions, detect available tools and read current config:
 # Detect available review backends
 HAVE_RP=$(which rp-cli >/dev/null 2>&1 && echo 1 || echo 0)
 HAVE_CODEX=$(which codex >/dev/null 2>&1 && echo 1 || echo 0)
+HAVE_COPILOT=$(which copilot >/dev/null 2>&1 && echo 1 || echo 0)
 
 # Read current config values if they exist
 CURRENT_BACKEND=$("${PLUGIN_ROOT}/scripts/flowctl" config get review.backend --json 2>/dev/null | jq -r '.value // empty')
@@ -186,7 +187,7 @@ Current configuration:
 - Memory: <enabled|disabled> (change with: flowctl config set memory.enabled <true|false>)
 - Plan-Sync: <enabled|disabled> (change with: flowctl config set planSync.enabled <true|false>)
 - Plan-Sync cross-epic: <enabled|disabled> (change with: flowctl config set planSync.crossEpic <true|false>)
-- Review backend: <codex|rp|none> (change with: flowctl config set review.backend <codex|rp|none>)
+- Review backend: <current value, bare or spec form> (change with: flowctl config set review.backend <codex|rp|copilot|none OR spec form like codex:gpt-5.4:xhigh>)
 - GitHub scout: <enabled|disabled> (change with: flowctl config set scouts.github <true|false>)
 ```
 
@@ -257,12 +258,15 @@ Available questions (include only if corresponding config is unset):
   "question": "Which review backend for Carmack-level reviews?",
   "options": [
     {"label": "Codex CLI", "description": "Cross-platform, uses GPT 5.2 High for reviews. Simple setup, works everywhere. <detected if HAVE_CODEX=1, (not detected) if HAVE_CODEX=0>"},
+    {"label": "Copilot CLI", "description": "Cross-platform, routes to Claude (Sonnet/Opus/Haiku 4.5) or GPT-5.2 via GitHub Copilot. Requires gh copilot auth. <detected if HAVE_COPILOT=1, (not detected) if HAVE_COPILOT=0>"},
     {"label": "RepoPrompt", "description": "macOS only. Auto-discovers git diffs + context, reviews scoped to actual changes, ~65% fewer tokens than traditional approaches. <detected if HAVE_RP=1, (not detected) if HAVE_RP=0>"},
     {"label": "None", "description": "Skip reviews, can configure later with --review flag"}
   ],
   "multiSelect": false
 }
 ```
+
+Stored value is a bare backend name by default. Power users can also write a full spec like `codex:gpt-5.4:high` or `copilot:claude-opus-4.5:xhigh` via `flowctl config set review.backend <spec>` after setup — the review commands accept both forms.
 
 **Docs question** (always include — adjust default based on platform):
 
@@ -309,11 +313,11 @@ For **Claude Code / Droid**:
 }
 ```
 
-Use `AskUserQuestion` with the built questions array.
+Use `AskUserQuestion` with the built questions array (call `ToolSearch` with `select:AskUserQuestion` first if its schema isn't loaded). sync-codex.sh rewrites this to `request_user_input` in the Codex mirror.
 
 **Note:** If docs are already current, adjust the Docs question description to mention "(already up to date)" or skip that question entirely.
 
-**Note:** If neither rp-cli nor codex is detected, add note to the Review question: "Neither rp-cli nor codex detected. Install one for review support."
+**Note:** If none of rp-cli, codex, or copilot is detected, add note to the Review question: "No review backend detected. Install rp-cli, codex, or copilot for review support."
 
 ## Step 7: Process Answers
 
@@ -342,6 +346,7 @@ Map user's answer to config value and persist:
 # Determine backend from answer
 case "$review_answer" in
   "Codex"*) REVIEW_BACKEND="codex" ;;
+  "Copilot"*|"copilot"*) REVIEW_BACKEND="copilot" ;;
   "RepoPrompt"*) REVIEW_BACKEND="rp" ;;
   *) REVIEW_BACKEND="none" ;;
 esac

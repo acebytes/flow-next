@@ -13,13 +13,14 @@ Task tracking for AI agents. All state lives in `.flow/`.
 
 ```
 .flow/
-├── bin/flowctl             # CLI (this install)
-├── epics/fn-N-slug.json    # Epic metadata (e.g., fn-1-add-oauth.json)
-├── specs/fn-N-slug.md      # Epic specifications
-├── tasks/fn-N-slug.M.json  # Task metadata (e.g., fn-1-add-oauth.1.json)
-├── tasks/fn-N-slug.M.md    # Task specifications
-├── memory/                 # Context memory
-└── meta.json               # Project metadata
+├── bin/flowctl                  # CLI (this install)
+├── epics/fn-N-slug.json         # Epic metadata (e.g., fn-1-add-oauth.json)
+├── specs/fn-N-slug.md           # Epic specifications
+├── tasks/fn-N-slug.M.json       # Task metadata (e.g., fn-1-add-oauth.1.json)
+├── tasks/fn-N-slug.M.md         # Task specifications
+├── memory/                      # Context memory (categorized bug/ + knowledge/)
+├── prospects/<slug>-<date>.md   # Ideation artifacts (v0.36.0+)
+└── meta.json                    # Project metadata
 ```
 
 ## IDs
@@ -62,6 +63,54 @@ Task tracking for AI agents. All state lives in `.flow/`.
 # Work
 .flow/bin/flowctl start fn-1-add-oauth.2        # Claim task
 .flow/bin/flowctl done fn-1-add-oauth.2 --summary-file s.md --evidence-json e.json
+
+# Epic cognitive-aid export (used by /flow-next:make-pr, v0.42.0+)
+.flow/bin/flowctl epic export-cognitive-aid fn-1-add-oauth                  # text mode summary
+.flow/bin/flowctl epic export-cognitive-aid fn-1-add-oauth --json           # full structured payload
+.flow/bin/flowctl epic export-cognitive-aid fn-1-add-oauth --base main      # diff against base ref
+.flow/bin/flowctl epic export-cognitive-aid fn-1-add-oauth --section coverage --json  # one section only
+
+# Prospect (ideation artifacts under .flow/prospects/, v0.36.0+)
+.flow/bin/flowctl prospect list                          # active artifacts (<30d)
+.flow/bin/flowctl prospect list --all --json             # everything
+.flow/bin/flowctl prospect read <id>                     # full body
+.flow/bin/flowctl prospect read <id> --section survivors # focus|grounding|survivors|rejected
+.flow/bin/flowctl prospect promote <id> --idea N         # idea N → new epic
+.flow/bin/flowctl prospect promote <id> --idea N --force # override idempotency guard
+.flow/bin/flowctl prospect archive <id>                  # → .flow/prospects/_archive/
+
+# Memory (categorized learnings under .flow/memory/, v0.33.0+)
+.flow/bin/flowctl memory list                            # default: --status active
+.flow/bin/flowctl memory list --status stale             # stale entries only
+.flow/bin/flowctl memory search <query>                  # default: --status active
+.flow/bin/flowctl memory search <query> --status all     # active + stale
+.flow/bin/flowctl memory read <id>                       # full entry
+.flow/bin/flowctl memory mark-stale <id> --reason "..."  # flag stale (v0.37.0+)
+.flow/bin/flowctl memory mark-fresh <id>                 # clear stale flag (v0.37.0+)
+.flow/bin/flowctl memory list-legacy                     # list legacy entries with mechanical defaults (v0.37.0+)
+.flow/bin/flowctl memory list-legacy --json              # used by /flow-next:memory-migrate skill
+.flow/bin/flowctl memory migrate [--yes] [--json]        # deterministic-only legacy migration (use /flow-next:memory-migrate for agent-native classification)
+
+# Glossary (project-canonical terms at repo root, v0.39.0+ — survives `rm -rf .flow/`)
+.flow/bin/flowctl glossary add <term> --definition "..."           # upsert single-line term
+.flow/bin/flowctl glossary add <term> --definition-file body.md    # multi-line definition from file
+.flow/bin/flowctl glossary add <term> --definition-file -          # multi-line from stdin
+.flow/bin/flowctl glossary add <term> --avoid "alt1,alt2" --relates-to "x,y"
+.flow/bin/flowctl glossary list                                    # text mode: grouped by file (nearest first)
+.flow/bin/flowctl glossary list --json                             # {groups, file_count, total_terms}
+.flow/bin/flowctl glossary read <term>                             # nearest-ancestor walk; first match wins
+.flow/bin/flowctl glossary read <term> --json                      # {path, term, definition, avoid, relates_to}
+.flow/bin/flowctl glossary remove <term>                           # last-term remove leaves `# Glossary` husk (R18)
+
+# Strategy (project-canonical strategic intent at repo root, v0.40.0+ — survives `rm -rf .flow/`)
+.flow/bin/flowctl strategy status                                  # text mode: husk / sections_filled / total_sections / last_updated
+.flow/bin/flowctl strategy status --json                           # {exists, husk, sections_filled, total_sections, last_updated, file_path}
+.flow/bin/flowctl strategy read                                    # full STRATEGY.md (single-root walk from cwd up to repo root)
+.flow/bin/flowctl strategy read --section approach                 # one section only (target_problem / approach / personas / metrics / tracks / milestones / not_working_on)
+.flow/bin/flowctl strategy read --json                             # {path, name, last_updated, target_problem, approach, personas, metrics, tracks, milestones, not_working_on}
+.flow/bin/flowctl strategy list --json                             # {groups, file_count, total_sections} — parallel to glossary list
+
+# /flow-next:strategy skill writes STRATEGY.md directly (no flowctl strategy add — too prose-heavy for atomic CLI).
 ```
 
 ## Workflow
