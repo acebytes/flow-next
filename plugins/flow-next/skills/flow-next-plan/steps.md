@@ -118,7 +118,7 @@ Run ALL of these scouts in parallel:
 | `flow-next:docs-scout` | External documentation | YES |
 | `flow-next:github-scout` | Cross-repo patterns via gh CLI | IF scouts.github |
 | `flow-next:memory-scout` | Project memory entries | IF memory.enabled |
-| `flow-next:epic-scout` | Dependencies on open epics | YES |
+| `flow-next:spec-scout` | Dependencies on open specs | YES |
 | `flow-next:docs-gap-scout` | Docs needing updates | YES |
 
 **If user chose repo-scout (default/faster)** OR rp-cli unavailable:
@@ -131,7 +131,7 @@ Run ALL of these scouts in parallel:
 | `flow-next:docs-scout` | External documentation | YES |
 | `flow-next:github-scout` | Cross-repo patterns via gh CLI | IF scouts.github |
 | `flow-next:memory-scout` | Project memory entries | IF memory.enabled |
-| `flow-next:epic-scout` | Dependencies on open epics | YES |
+| `flow-next:spec-scout` | Dependencies on open specs | YES |
 | `flow-next:docs-gap-scout` | Docs needing updates | YES |
 
 **Anti-pattern**: Running only 2-3 scouts "because they seem most relevant" — this causes incomplete plans.
@@ -143,7 +143,7 @@ Must capture:
 - External docs links
 - Project conventions (CLAUDE.md, CONTRIBUTING, etc)
 - Architecture patterns and data flow (especially with context-scout)
-- Epic dependencies (from epic-scout)
+- Spec dependencies (from spec-scout)
 - Doc updates needed (from docs-gap-scout) - add to task acceptance criteria
 - DESIGN.md design system tokens (if repo-scout found one)
 
@@ -321,17 +321,17 @@ Default to standard unless complexity demands more or less.
    - R-IDs in `## Acceptance` and `## Requirement coverage` must match (same IDs, same meanings).
    - R-IDs are plain markdown prose, not YAML — the reviewer matches them via LLM reasoning, not strict parsing.
 
-4. Set epic dependencies (from epic-scout findings):
+4. Set spec dependencies (from spec-scout findings):
 
-   If epic-scout found dependencies, set them automatically:
+   If spec-scout found dependencies, set them automatically:
    ```bash
-   # For each dependency found by epic-scout:
+   # For each dependency found by spec-scout:
    $FLOWCTL epic add-dep <new-epic-id> <dependency-epic-id> --json
    ```
 
    Report findings at end of planning (no user prompt needed):
    ```
-   Epic dependencies set:
+   Spec dependencies set:
    - fn-N-slug → fn-2-add-auth (Auth): Uses authService from fn-2-add-auth.1
    - fn-N-slug → fn-5-user-model (DB): Extends User model
    ```

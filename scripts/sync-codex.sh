@@ -28,7 +28,7 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 # Scouts that need full intelligence (reasoning/judgment, not just scanning)
-INTELLIGENT_SCOUTS="epic-scout agents-md-scout docs-gap-scout"
+INTELLIGENT_SCOUTS="spec-scout agents-md-scout docs-gap-scout"
 # Agents that use opus in Claude Code
 OPUS_AGENTS="quality-auditor flow-gap-analyst context-scout docs-scout github-scout practice-scout repo-scout plan-sync"
 
@@ -95,7 +95,7 @@ nicknames_for() {
     docs-gap-scout)       echo '["Inspector", "Reviewer", "Auditor"]' ;;
     docs-scout)           echo '["Scholar", "Researcher", "Curator"]' ;;
     env-scout)            echo '["Provisioner", "Configurer", "Warden"]' ;;
-    epic-scout)           echo '["Strategist", "Planner", "Coordinator"]' ;;
+    spec-scout)           echo '["Strategist", "Planner", "Coordinator"]' ;;
     github-scout)         echo '["Tracker", "Monitor", "Watcher"]' ;;
     memory-scout)         echo '["Chronicler", "Historian", "Recorder"]' ;;
     observability-scout)  echo '["Sentinel", "Observer", "Beacon"]' ;;
@@ -278,7 +278,7 @@ if [ -f "$plan_steps" ]; then
     -e 's|`flow-next:docs-scout`|the `docs_scout` agent|g' \
     -e 's|`flow-next:github-scout`|the `github_scout` agent|g' \
     -e 's|`flow-next:memory-scout`|the `memory_scout` agent|g' \
-    -e 's|`flow-next:epic-scout`|the `epic_scout` agent|g' \
+    -e 's|`flow-next:spec-scout`|the `spec_scout` agent|g' \
     -e 's|`flow-next:docs-gap-scout`|the `docs_gap_scout` agent|g' \
     -e 's|`flow-next:flow-gap-analyst`|the `flow_gap_analyst` agent|g' \
     -e 's|Task flow-next:flow-gap-analyst|Use the flow_gap_analyst agent|g' \
