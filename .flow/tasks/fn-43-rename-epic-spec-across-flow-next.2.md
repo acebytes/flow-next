@@ -59,8 +59,8 @@ Layer deprecation warnings and read-compatibility on top of T1's canonical surfa
 - [ ] `meta.json` `next_epic` field read-compat: 0.x meta with only `next_epic` key reads correctly; new writes emit `next_spec` (T1 rule for fresh init; T3 migration handles existing meta).
 
 ## Done summary
-
+Layered the deprecation/alias surface on T1's parallel-subparser scaffolding: one-shot stderr deprecations on every legacy epic-named user-facing entry point (flowctl epic *, flowctl epics, --epic, --epics-file, EPICS_FILE, --section epic), persisted task JSON canonicalized to 'spec' only via a new canonicalize_task_for_write helper applied at every write site, normalize_task migrates legacy 0.x epic->spec on read, R31 dual-emit (spec/epic, specs/epics, spec_id/epic_id, plus reason: blocked_by_spec_deps + legacy_reason: blocked_by_epic_deps) extended to all remaining CLI --json outputs, and checkpoint files write canonical with read-compat for 0.x-saved checkpoints.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 3658890c5d6b8b4b3c9a3d4ea05e5a2afe69caa0, 6b2175bc98c8fe28e40d6a1cb13f7c329b514dc5
+- Tests: python3 -c 'import ast; ast.parse(open("plugins/flow-next/scripts/flowctl.py").read())', manual smoke: flowctl init/spec create/task create/dep add/checkpoint save+restore/spec set-title/spec close — all canonical writes verified, verified --epic / --epics-file / --section epic / EPICS_FILE / flowctl epic / flowctl epics deprecations fire, all canonical forms silent, verified flowctl next blocked-deps emits reason: blocked_by_spec_deps + legacy_reason: blocked_by_epic_deps + blocked_specs + blocked_epics, verified legacy 0.x task JSON ("epic" key only) reads correctly via normalize_task; canonicalizes in-place on first write via canonicalize_task_for_write, verified read-path filesystem fallback (epics/<id>.json + specs/<id>.md only) works on flowctl show, verified meta.json with only next_epic key still passes flowctl detect, verified strategy_smoke_test.sh + glossary_smoke_test.sh + audit_smoke_test.sh still pass, codex:gpt-5.5:high impl-review SHIP after one NEEDS_WORK → SHIP cycle
 - PRs:
