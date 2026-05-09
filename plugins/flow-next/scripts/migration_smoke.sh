@@ -723,11 +723,11 @@ echo -e "${YELLOW}--- Scenario 11: atomic sentinel + crash-during-step-11 ---${N
   echo "" > .flow/.flow_version
   # Verify _migrate_sentinel_state rejects empty payload by checking that
   # the migration banner fires (it only fires when sentinel is invalid).
-  # We turn FLOW_NO_AUTO_MIGRATE off temporarily for this assertion.
+  # `env -u` clears every banner-suppression knob so this assertion does
+  # not depend on the caller's environment.
   STDERR_FILE="$TEST_DIR/scen11b-stderr.txt"
-  unset FLOW_NO_AUTO_MIGRATE
-  scripts/flowctl status --json 2>"$STDERR_FILE" >/dev/null || true
-  export FLOW_NO_AUTO_MIGRATE=1
+  env -u FLOW_NO_AUTO_MIGRATE -u FLOW_RALPH -u REVIEW_RECEIPT_PATH \
+    scripts/flowctl status --json 2>"$STDERR_FILE" >/dev/null || true
   if grep -q 'flow-next 1.0 renamed' "$STDERR_FILE"; then
     ok "Scenario 11b: empty sentinel triggers banner (treated as not-migrated)"
   else
@@ -735,9 +735,8 @@ echo -e "${YELLOW}--- Scenario 11: atomic sentinel + crash-during-step-11 ---${N
     # legacy dir so the banner code path activates.
     mkdir -p .flow/epics
     : > "$STDERR_FILE"
-    unset FLOW_NO_AUTO_MIGRATE
-    scripts/flowctl status --json 2>"$STDERR_FILE" >/dev/null || true
-    export FLOW_NO_AUTO_MIGRATE=1
+    env -u FLOW_NO_AUTO_MIGRATE -u FLOW_RALPH -u REVIEW_RECEIPT_PATH \
+      scripts/flowctl status --json 2>"$STDERR_FILE" >/dev/null || true
     if grep -q 'flow-next 1.0 renamed' "$STDERR_FILE"; then
       ok "Scenario 11b: empty sentinel triggers banner (after epics/ restored)"
     else
@@ -849,13 +848,22 @@ print("OK")
 # ─────────────────────────────────────────────────────────────────────────────
 echo -e "${YELLOW}--- Banner suppression matrix (T4) ---${NC}"
 
+# `unsuppressed_flowctl` invokes flowctl with the three banner-suppression
+# env vars explicitly cleared, so B1 / B2 / B6 / B7 measure unsuppressed
+# behavior even when the caller (e.g. this script itself, line 121) has
+# FLOW_NO_AUTO_MIGRATE=1 in scope. The B3 cases below test individual
+# suppression knobs and re-set their target env var explicitly.
+unsuppressed_flowctl() {
+  env -u FLOW_NO_AUTO_MIGRATE -u FLOW_RALPH -u REVIEW_RECEIPT_PATH "$@"
+}
+
 # B1: pre-1.0 fixture, no suppression knobs → 6-line banner emitted on stderr.
 (
   RB1="$TEST_DIR/banner1"
   make_pre10_fixture "$RB1"
   cd "$RB1"
   STDERR_FILE="$TEST_DIR/banner1-stderr.txt"
-  scripts/flowctl status --json 2>"$STDERR_FILE" >/dev/null || true
+  unsuppressed_flowctl scripts/flowctl status --json 2>"$STDERR_FILE" >/dev/null || true
   STDERR="$(cat "$STDERR_FILE")"
   expected_lines=(
     "flow-next 1.0 renamed"
@@ -884,7 +892,7 @@ echo -e "${YELLOW}--- Banner suppression matrix (T4) ---${NC}"
   RB2="$TEST_DIR/banner2"
   make_pre10_fixture "$RB2"
   cd "$RB2"
-  STDOUT="$(scripts/flowctl status --json 2>/dev/null)"
+  STDOUT="$(unsuppressed_flowctl scripts/flowctl status --json 2>/dev/null)"
   if echo "$STDOUT" | "$PYTHON_BIN" -c 'import json, sys; json.load(sys.stdin); print("OK")' >/dev/null; then
     ok "Banner B2: --json stdout parses cleanly with banner on stderr"
   else
@@ -961,7 +969,7 @@ Path(".flow/.banner-acknowledged").write_text(datetime.now(timezone.utc).isoform
   echo "2.0.0" > .flow/.flow_version
   STDERR_FILE="$TEST_DIR/banner6-stderr.txt"
   set +e
-  scripts/flowctl status --json 2>"$STDERR_FILE" >/dev/null
+  unsuppressed_flowctl scripts/flowctl status --json 2>"$STDERR_FILE" >/dev/null
   rc=$?
   set -e
   STDERR="$(cat "$STDERR_FILE")"
@@ -985,7 +993,7 @@ Path(".flow/.banner-acknowledged").write_text(datetime.now(timezone.utc).isoform
   scripts/flowctl migrate-rename --yes --json 2>/dev/null >/dev/null
   echo "1.5.2" > .flow/.flow_version
   STDERR_FILE="$TEST_DIR/banner7-stderr.txt"
-  scripts/flowctl status --json 2>"$STDERR_FILE" >/dev/null || true
+  unsuppressed_flowctl scripts/flowctl status --json 2>"$STDERR_FILE" >/dev/null || true
   STDERR="$(cat "$STDERR_FILE")"
   if ! echo "$STDERR" | grep -q 'newer flow-next'; then
     ok "Banner B7: 1.x sentinel (1.5.2) is silent (no forward-compat warning)"
