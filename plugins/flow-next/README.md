@@ -1898,7 +1898,7 @@ NO `flowctl strategy add/edit/remove`. Strategy editing happens via `/flow-next:
 
 ## Commands
 
-Eighteen commands, complete workflow:
+Nineteen commands, complete workflow:
 
 | Command | What It Does |
 |---------|--------------|
