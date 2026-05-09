@@ -30,6 +30,7 @@ import importlib.util
 import io
 import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -592,6 +593,110 @@ class TestNextSpecMetaPersistedShape(unittest.TestCase):
             self.assertEqual(meta["schema_version"], 2)
             # Legacy form preserved on disk; readers fall back to it.
             self.assertIn("next_epic", meta)
+
+
+class TestCmdStatusDualEmit(unittest.TestCase):
+    """`flowctl status --json` co-emits canonical `specs` + legacy `epics` counts."""
+
+    def test_status_dual_emits_specs_and_epics_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _seed_alias_mode_repo(Path(tmp))
+            with _chdir(Path(tmp)):
+                result = _capture_json_output(
+                    flowctl.cmd_status, argparse.Namespace(json=True)
+                )
+        self.assertIn("specs", result)
+        self.assertIn("epics", result)
+        # Both keys point at the same dict instance / value.
+        self.assertEqual(result["specs"], result["epics"])
+        self.assertEqual(result["specs"]["open"], 2)
+
+
+class TestCmdCheckpointSaveDualEmit(unittest.TestCase):
+    """`flowctl checkpoint save --json` co-emits canonical `spec_id` + legacy `epic_id`.
+
+    The full `spec_id`/`epic_id` JSON-stdout contract is exercised here — this
+    is the canonical place where both keys are emitted together for one
+    spec at a time (cmd_show_task uses spec/epic, NOT _id).
+    """
+
+    def test_checkpoint_save_dual_emits_spec_id_and_epic_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _seed_alias_mode_repo(Path(tmp))
+            with _chdir(Path(tmp)):
+                result = _capture_json_output(
+                    flowctl.cmd_checkpoint_save,
+                    argparse.Namespace(spec="fn-1", epic=None, json=True),
+                )
+        self.assertIn("spec_id", result)
+        self.assertIn("epic_id", result)
+        self.assertEqual(result["spec_id"], "fn-1")
+        self.assertEqual(result["epic_id"], "fn-1")
+        # Both keys MUST equal — that's the dual-emit contract.
+        self.assertEqual(result["spec_id"], result["epic_id"])
+
+
+class TestCmdMigrateRenameMetaSummaryDualEmit(unittest.TestCase):
+    """`flowctl migrate-rename --yes --json` emits meta_summary that exposes
+    the next_epic → next_spec rename in both `prev` (legacy) and `next`
+    (canonical) blocks. This is the closest stdout dual-emit surface for the
+    next_spec/next_epic field — fresh allocation lives in the meta_summary
+    payload of migrate-rename receipts."""
+
+    def test_meta_summary_carries_both_names_across_prev_and_next(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _seed_alias_mode_repo(Path(tmp))
+            with _chdir(Path(tmp)):
+                result = _capture_json_output(
+                    flowctl.cmd_migrate_rename,
+                    argparse.Namespace(
+                        yes=True,
+                        dry_run=False,
+                        json=True,
+                        force_overwrite_post_migration_changes=False,
+                    ),
+                )
+        # entries contains rewrite_meta with prev (legacy) + next (canonical).
+        rewrite_entries = [
+            e for e in result.get("entries", []) if e.get("action") == "rewrite_meta"
+        ]
+        self.assertEqual(len(rewrite_entries), 1)
+        rewrite = rewrite_entries[0]
+        # Legacy form preserved in `prev`.
+        self.assertIn("next_epic", rewrite["prev"])
+        self.assertEqual(rewrite["prev"]["next_epic"], 3)
+        # Canonical form lands in `next`.
+        self.assertIn("next_spec", rewrite["next"])
+        self.assertEqual(rewrite["next"]["next_spec"], 3)
+        # Migration drops the legacy key from the post-migration meta.
+        self.assertNotIn("next_epic", rewrite["next"])
+
+    def test_dual_emit_round_trips_via_real_flowctl_subprocess(self) -> None:
+        """Belt-and-braces end-to-end: drive the actual `flowctl status --json`
+        binary from a subprocess against a seeded repo and parse its stdout
+        JSON. Verifies the `specs`/`epics` dual-emit clears the wire — not
+        just an in-process json_output capture.
+        """
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            _seed_alias_mode_repo(Path(tmp))
+            proc = subprocess.run(
+                [sys.executable, str(FLOWCTL_PY), "status", "--json"],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "FLOW_NO_AUTO_MIGRATE": "1"},
+                timeout=30,
+            )
+            self.assertEqual(
+                proc.returncode, 0, msg=f"stderr: {proc.stderr}"
+            )
+            payload = json.loads(proc.stdout)
+        # Both keys present, same value.
+        self.assertIn("specs", payload)
+        self.assertIn("epics", payload)
+        self.assertEqual(payload["specs"], payload["epics"])
+        self.assertEqual(payload["specs"]["open"], 2)
 
 
 class TestPersistedTaskJsonCanonicalOnlyOnWrite(unittest.TestCase):
