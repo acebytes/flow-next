@@ -12,7 +12,10 @@ fi
 
 TEST_DIR="${TEST_DIR:-/tmp/flow-next-plan-review-smoke-rp-$$}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
-EPIC_ID="${EPIC_ID:-fn-1}"
+# SPEC_ID is captured from `flowctl spec create --json` below — fn-43 slugs
+# titles into the id (e.g. fn-1-tiny-lib), so a hard-coded `fn-1` doesn't
+# work. The env var still overrides for callers who control the title.
+SPEC_ID="${EPIC_ID:-${SPEC_ID:-}}"
 
 fail() { echo "plan_review_prompt_smoke: $*" >&2; exit 1; }
 
@@ -64,7 +67,15 @@ chmod +x scripts/ralph/flowctl
 
 FLOWCTL="scripts/ralph/flowctl"
 $FLOWCTL init --json >/dev/null
-$FLOWCTL spec create --title "Tiny lib" --json >/dev/null
+# Capture the slug-stamped spec id from create's JSON output. fn-43+
+# stamps the title into the id (e.g. "Tiny lib" -> fn-1-tiny-lib); a
+# hard-coded fn-1 would no longer match.
+if [[ -z "$SPEC_ID" ]]; then
+  SPEC_ID=$($FLOWCTL spec create --title "Tiny lib" --json | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+else
+  $FLOWCTL spec create --title "Tiny lib" --json >/dev/null
+fi
+EPIC_ID="$SPEC_ID"  # back-compat for callers reading the var name
 
 cat > "$TEST_DIR/epic.md" <<'EOF'
 # fn-1 Tiny lib

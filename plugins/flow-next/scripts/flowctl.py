@@ -4160,6 +4160,46 @@ def find_active_run(
 # --- Commands ---
 
 
+# fn-43: auto-managed .flow/.gitignore patterns. flowctl init writes this on
+# fresh repos; flowctl migrate-rename ensures it on upgrade. Patterns are
+# relative to .flow/ (Git resolves a directory-local .gitignore against its
+# own path). User edits below the sentinel comment are preserved on update.
+FLOW_GITIGNORE_AUTO_HEADER = "# Auto-managed by flowctl — do not edit above this marker."
+FLOW_GITIGNORE_AUTO_FOOTER = "# End of auto-managed block. User patterns below this line are preserved."
+FLOW_GITIGNORE_AUTO_PATTERNS = [
+    # Per-developer / per-run state (existed pre-fn-43; kept for completeness)
+    ".checkpoint-*.json",
+    "receipts/",
+    "tmp/",
+    # fn-43 v1.0 migration transients (created by flowctl migrate-rename)
+    ".backup-pre-1.0/",
+    ".banner-acknowledged",
+    ".migrating",
+    ".migration-manifest",
+]
+
+
+def _ensure_flow_gitignore(flow_dir: Path) -> bool:
+    """Idempotently ensure .flow/.gitignore has the auto-managed patterns.
+
+    Returns True if the file was created or updated, False if no-op.
+    Preserves any user-added patterns below the auto-managed footer.
+    """
+    gi_path = flow_dir / ".gitignore"
+    auto_block = "\n".join(
+        [FLOW_GITIGNORE_AUTO_HEADER, *FLOW_GITIGNORE_AUTO_PATTERNS, FLOW_GITIGNORE_AUTO_FOOTER]
+    )
+    if not gi_path.exists():
+        gi_path.write_text(auto_block + "\n", encoding="utf-8")
+        return True
+    existing = gi_path.read_text(encoding="utf-8")
+    if FLOW_GITIGNORE_AUTO_HEADER in existing and FLOW_GITIGNORE_AUTO_FOOTER in existing:
+        return False  # already managed; user content preserved
+    # File exists but isn't managed — prepend the auto block so user content stays.
+    gi_path.write_text(auto_block + "\n\n" + existing, encoding="utf-8")
+    return True
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     """Initialize or upgrade .flow/ directory structure (idempotent)."""
     flow_dir = get_flow_dir()
@@ -4174,6 +4214,12 @@ def cmd_init(args: argparse.Namespace) -> None:
         if not dir_path.exists():
             dir_path.mkdir(parents=True)
             actions.append(f"created {subdir}/")
+
+    # fn-43: write .flow/.gitignore so users don't accidentally commit
+    # migration transients (.backup-pre-1.0/, .banner-acknowledged, etc.)
+    # or per-run state (.checkpoint-*.json, receipts/, tmp/).
+    if _ensure_flow_gitignore(flow_dir):
+        actions.append("wrote .gitignore")
 
     # Create meta.json if missing (never overwrite existing).
     # fn-43.1: schema_version 3 + next_spec is canonical post-1.0.
@@ -14583,7 +14629,13 @@ def cmd_migrate_rename(args: argparse.Namespace) -> None:
             "meta_summary": meta_summary,
         })
 
-        # 11. Sentinel — written LAST via atomic_write so a crash mid-write
+        # 11a. Ensure .flow/.gitignore has the auto-managed patterns so
+        # users don't accidentally commit the .backup-pre-1.0/ directory or
+        # other transients on their first post-migration `git add -A`.
+        # Idempotent — preserves user-added patterns below the auto-block.
+        _ensure_flow_gitignore(flow_dir)
+
+        # 11b. Sentinel — written LAST via atomic_write so a crash mid-write
         # never leaves a partial sentinel that the next run mistakes for
         # "already migrated". atomic_write writes to a tempfile then
         # os.replace's into place — either the full content lands or

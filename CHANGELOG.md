@@ -35,6 +35,21 @@ All notable changes to the flow-next.
 ### Rollback
 - **`flowctl migrate-rollback --yes` restores the pre-1.0 layout.** The migration writes a transactional backup to `.flow/.backup-pre-1.0/` before touching anything; rollback restores from that backup, deletes `.flow/specs/` + `.flow/.migration-manifest`, and re-asserts `.flow/epics/`. Post-migration writes (new specs / task updates / done summaries authored after migrate-rename) are detected and rollback refuses by default — pass `--force-overwrite-post-migration-changes` to discard them explicitly. Lockfile-guarded so a peer migrate-rename + migrate-rollback can't race.
 
+### Auto-managed `.flow/.gitignore`
+- **`flowctl init` and `flowctl migrate-rename` now write `.flow/.gitignore`** with patterns that exclude transient migration + per-run state from version control. Auto-managed block:
+  ```gitignore
+  # Auto-managed by flowctl — do not edit above this marker.
+  .checkpoint-*.json
+  receipts/
+  tmp/
+  .backup-pre-1.0/
+  .banner-acknowledged
+  .migrating
+  .migration-manifest
+  # End of auto-managed block. User patterns below this line are preserved.
+  ```
+  Idempotent on subsequent invocations; user-added patterns below the footer are preserved on update. **Why this matters:** without it, the first `git add -A` after running `flowctl migrate-rename` would commit a multi-megabyte `.flow/.backup-pre-1.0/` directory, the per-developer `.flow/.banner-acknowledged` timestamp, and the stale `.flow/.migrating` lockfile. `.flow/.flow_version` is intentionally NOT in the auto-managed block — that's the schema sentinel and should be tracked per repo so multiple devs share the migrated state (semantics like `Cargo.lock`).
+
 ### Known issue (anthropics/claude-code#52218)
 - **Claude Code's plugin auto-update may stale on bundled hook changes.** When a flow-next release ships hook-file changes (Ralph guard hooks, PreToolUse matchers), Claude Code's plugin auto-update path occasionally serves the cached pre-update hook bundle even after the manifest version bumps. Symptom: `flowctl` CLI reports 1.0.0 but Ralph guard hooks behave like 0.42.0. Workaround: run `/plugin update flow-next` manually once after upgrading; this forces a hot-reload of the bundled hook bundle. Tracking upstream: anthropics/claude-code#52218. Codex (`scripts/install-codex.sh flow-next`) and Factory Droid plugin paths are unaffected — only the Claude Code marketplace auto-update path exhibits this behavior.
 
