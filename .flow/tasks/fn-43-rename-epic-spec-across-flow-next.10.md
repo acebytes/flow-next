@@ -70,8 +70,8 @@ Sweep the medium- and low-density skills (everything not covered by T7a, T7b, T8
 - [ ] `AskUserQuestion` call in setup upgrade branch uses canonical Claude-native name (sync-codex.sh rewrites for Codex mirror in T15). <!-- Updated by plan-sync: T6 done summary confirms Codex mirror regen lives in T15, not T13 -->
 
 ## Done summary
-
+Swept 14 skill directories + 4 agent files for `epic` → `spec` prose updates per the fn-43 rename. Added a new `flow-next-setup` Step 1b "Pre-1.0 layout detection" interactive arm (R5/R24): detects `.flow/epics/` + missing `.flow/.flow_version` sentinel, prompts via `AskUserQuestion` for migrate-now / defer / suppress-permanently, and dispatches `flowctl migrate-rename --yes` (or `--dry-run` for the defer path's banner-ack side effect). Updated all `flow-next-setup/templates/*.md` user-repo-bound snippets to spec vocabulary (R17). Renamed internal `EPIC_MODE` → `SPEC_MODE` in `flow-next-work/phases.md`. Rewrote CLI verbs in `agents/{spec-scout,plan-sync}.md` from legacy-alias form to canonical (T5 carryover); confirmed `worker.md` and `quality-auditor.md` were already canonical post-T5 (commit 225dc94) via grep, recorded the finding via plan-sync breadcrumbs in this task spec. Frozen-string slugs preserved for artifact round-trip (`duplicates-open-epic` taxonomy in prospect, `planSync.crossEpic` config key). 57 CI tests pass; codex `gpt-5.5:high` impl-review verdict: SHIP after one NEEDS_WORK→SHIP fix cycle.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: f36a8180cd2631cb44349ffc2ae72916488d4021, 0c91f502624f6d1f21b9d0608dd2873b0a70d68b, dad5e2891a8aa2e35ac08f3276ffb380c29ed416
+- Tests: plugins/flow-next/scripts/ci_test.sh — 57 passed, 0 failed, flowctl codex impl-review --spec codex:gpt-5.5:high — verdict: SHIP
 - PRs:
