@@ -54,8 +54,8 @@ Final assembly: bump versions, update plugin manifests, write the CHANGELOG `[fl
 - [ ] CHANGELOG block names alias deprecation timeline (R28) and the auto-update bug.
 
 ## Done summary
-
+T15 final assembly: bumped flow-next to 1.0.0 across 3 manifests; updated `.codex-plugin/plugin.json` longDescription and sync-codex.sh openai.yaml short_descriptions to use "spec" vocabulary; wrote CHANGELOG `[flow-next 1.0.0]` block (7 subsections: What changed / What still works / Two migration paths / Optional cleanup / Alias removal timeline / Rollback / Known issue); regenerated Codex mirror via sync-codex.sh (23 skills, 21 agents, all R30/R19/R17/R4 guards green). Reconciled stale skill / command counts (22→23 / 17→19 / Eighteen→Nineteen) across both READMEs. Replaced "alias removed in 2.0.0" with R28-aligned soft-removal phrasing across docs/. Added `/flow-next:epic-review` deprecation-alias row to plugin README commands table. ci_test 58/58, smoke_test 130/130, alias_smoke 20/20, migration_smoke 45/45 all pass.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 5643bde, 0046b67, 8fa1013, 862313b, 70b24df, ae7fb13
+- Tests: bash scripts/sync-codex.sh (clean, 23 skills + 21 agents + hooks.json, all R30/R19/R17/R4 mirror guards green), bash plugins/flow-next/scripts/ci_test.sh (58/58 pass), cd /tmp && bash plugins/flow-next/scripts/smoke_test.sh (130/130 pass), cd /tmp && bash plugins/flow-next/scripts/alias_smoke.sh (20/20 pass), cd /tmp && bash plugins/flow-next/scripts/migration_smoke.sh (45/45 pass), jq verification: marketplace + claude-plugin + codex-plugin all 1.0.0 with 19 commands / 23 skills / 21 subagents, Codex impl-review (codex:gpt-5.5:high, FLOW_VALIDATE_REVIEW=1): SHIP after fresh-receipt cycle
 - PRs:
