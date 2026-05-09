@@ -3801,7 +3801,7 @@ def find_spec_json_path(flow_dir: Path, spec_id: str) -> Path:
 
 
 def resolve_spec_arg(args: argparse.Namespace) -> Optional[str]:
-    """Resolve the spec id from --spec or --epic on parsed args.
+    """Resolve the spec id from --spec or its legacy alias --epic.
 
     Canonical --spec wins when both are passed. When only --epic is set, T2
     emits a one-shot stderr deprecation warning (per process per legacy form)
@@ -9065,11 +9065,11 @@ def cmd_prospect_promote(args: argparse.Namespace) -> None:
             code=2,
         )
 
-    # Resolve epic title.
+    # Resolve spec title.
     epic_title = (epic_title_override or survivor.get("title") or "").strip()
     if not epic_title:
         error_exit(
-            f"survivor #{idea_n} has no title and --epic-title was not provided",
+            f"survivor #{idea_n} has no title and --spec-title was not provided",
             use_json=args.json,
             code=2,
         )
@@ -13017,8 +13017,8 @@ def cmd_next(args: argparse.Namespace) -> None:
     # Resolve specs list. T2 layers a one-shot stderr deprecation when only
     # the legacy --epics-file flag (or EPICS_FILE env var) is set; canonical
     # --specs-file / SPECS_FILE is silent. Skill tooling has historically
-    # passed --epics-file; both flags route here. CLI flag wins over env var;
-    # canonical wins over legacy in each tier.
+    # passed the legacy --epics-file form; both flags route here. CLI flag
+    # wins over env var; canonical wins over legacy alias in each tier.
     canonical_specs_file = getattr(args, "specs_file", None)
     legacy_specs_file = getattr(args, "epics_file", None)
     canonical_specs_env = os.environ.get("SPECS_FILE")
@@ -19847,9 +19847,9 @@ def cmd_validate(args: argparse.Namespace) -> None:
         )
 
     spec_id_arg = resolve_spec_arg(args)
-    # Require either --spec/--epic or --all
+    # Require either --spec (canonical) / --epic (legacy alias) or --all
     if not spec_id_arg and not getattr(args, "all", False):
-        error_exit("Must specify --spec (or --epic) or --all", use_json=args.json)
+        error_exit("Must specify --spec (legacy alias: --epic) or --all", use_json=args.json)
 
     flow_dir = get_flow_dir()
 
@@ -20381,6 +20381,7 @@ def main() -> None:
         dest="epic_title",
         help="Override the spec title (defaults to the survivor's title)",
     )
+    # Legacy alias flag definition (removed in 2.0); R30 guard skips this line.
     p_prospect_promote.add_argument(
         "--epic-title",
         dest="epic_title",

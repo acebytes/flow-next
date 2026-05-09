@@ -826,7 +826,7 @@ fi
 # of canonical 1.0 `flowctl spec*`. Lines describing deprecation / alias /
 # legacy semantics are excluded — these legitimately reference the legacy
 # form. references/ files are also excluded (anti-pattern documentation).
-alias_refs=$( { grep -rE 'flowctl epic\b|flowctl epics\b' "$CODEX_DIR/skills/" "$CODEX_DIR/agents/" 2>/dev/null || true; } | { grep -vE '/references/' || true; } | { grep -vE 'deprecat|legacy|alias|_emit_rename_|removed in 2\.0|flow-next 1\.0 renamed' || true; } | wc -l | tr -d ' ')
+alias_refs=$( { grep -rE 'flowctl epic\b|flowctl epics\b|--epic\b|--epics-file\b|--section epic\b|\bEPICS_FILE\b' "$CODEX_DIR/skills/" "$CODEX_DIR/agents/" 2>/dev/null || true; } | { grep -vE '/references/' || true; } | { grep -vE 'deprecat|legacy|alias|_emit_rename_|removed in 2\.0|flow-next 1\.0 renamed|R31|R30|fn-43|\bT[0-9]+\b' || true; } | { grep -vE '^[^:]+:[0-9]+:[[:space:]]+"--(epic|epics-file|epic-title)",?[[:space:]]*$' || true; } | wc -l | tr -d ' ')
 if [ "$alias_refs" != "0" ]; then
   echo -e "  ${RED}✗${NC} $alias_refs R30 legacy CLI vocabulary refs in codex mirror — clean canonical first, then re-run sync"
   errors=$((errors + 1))

@@ -177,7 +177,7 @@ BRANCH="$(git branch --show-current)"
 
 # Get spec and task list
 SPEC="$($FLOWCTL cat "$SPEC_ID")"
-TASKS_JSON="$($FLOWCTL tasks --epic "$SPEC_ID" --json)"
+TASKS_JSON="$($FLOWCTL tasks --spec "$SPEC_ID" --json)"
 
 # Get changed files on branch
 DIFF_BASE="main"

@@ -431,20 +431,28 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 echo -e "\n${YELLOW}--- Alias-vocabulary guard (R30) ---${NC}"
 
+# Patterns: legacy verb (`flowctl epic*` / `flowctl epics`), legacy CLI flag
+# (`--epic`), legacy section filter (`--section epic`), legacy env var
+# (`EPICS_FILE`). Each must be absent from canonical prose unless the line
+# describes deprecation / alias / legacy semantics. Argparse declarations
+# of the legacy alias flags themselves (`"--epic-title",` / `"--epics-file",`
+# as the first arg of an `add_argument(...)` call) are excluded — those are
+# the alias entry points, not fresh prose using them.
 set +e
-ALIAS_HITS="$(grep -RnE 'flowctl epic\b|flowctl epics\b' \
+ALIAS_HITS="$(grep -RnE 'flowctl epic\b|flowctl epics\b|--epic\b|--epics-file\b|--section epic\b|\bEPICS_FILE\b' \
   "$PLUGIN_ROOT/skills" \
   "$PLUGIN_ROOT/scripts/flowctl.py" \
   "$PLUGIN_ROOT/agents" \
   "$PLUGIN_ROOT/commands" 2>/dev/null \
   | grep -vE '/references/' \
-  | grep -vE 'deprecat|legacy|alias|_emit_rename_|removed in 2\.0|flow-next 1\.0 renamed')"
+  | grep -vE 'deprecat|legacy|alias|_emit_rename_|removed in 2\.0|flow-next 1\.0 renamed|R31|R30|fn-43|\bT[0-9]+\b' \
+  | grep -vE '^[^:]+:[0-9]+:[[:space:]]+"--(epic|epics-file|epic-title)",?[[:space:]]*$')"
 set -e
 if [[ -n "$ALIAS_HITS" ]]; then
-  fail "R30 legacy CLI vocabulary in canonical (use 'flowctl spec' / 'flowctl specs'):"
+  fail "R30 legacy CLI vocabulary in canonical (use 'flowctl spec' / '--spec' / 'SPECS_FILE'):"
   echo "$ALIAS_HITS" | sed 's/^/    /'
 else
-  pass "R30: no legacy 'flowctl epic*' references in canonical (alias context excluded)"
+  pass "R30: no legacy CLI vocabulary in canonical (alias context excluded)"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────

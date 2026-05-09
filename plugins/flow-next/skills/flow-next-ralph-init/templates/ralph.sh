@@ -936,14 +936,14 @@ ensure_run_branch() {
 #   2. EPICS_FILE  (legacy env var — same alias permanence guarantee as flowctl T2)
 #   3. SPECS list  (config.env knob; we generate a JSON file under $RUN_DIR)
 #   4. (none)      (unscoped — selector walks every open spec)
-SPECS_FILE="${SPECS_FILE:-${EPICS_FILE:-}}"
+SPECS_FILE="${SPECS_FILE:-${EPICS_FILE:-}}"  # legacy fallback per fn-43.2
 if [[ -z "$SPECS_FILE" && -n "${SPECS// }" ]]; then
   SPECS_FILE="$RUN_DIR/run.json"
   write_specs_file "$SPECS" > "$SPECS_FILE"
 fi
 # Mirror canonical → legacy so any downstream reader using the legacy name
 # keeps working without an explicit setting.
-EPICS_FILE="$SPECS_FILE"
+EPICS_FILE="$SPECS_FILE"  # legacy alias kept through 1.x
 
 ui_header
 ui_config
