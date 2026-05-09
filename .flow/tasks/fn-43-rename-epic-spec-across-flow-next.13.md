@@ -40,8 +40,8 @@ Update the deep-detail flow-next docs surfaces under `plugins/flow-next/docs/` f
 - [ ] docs/teams.md updated to reflect spec-completion-review handover object name.
 
 ## Done summary
-
+Internal docs sweep for the epic->spec rename: rewrote `plugins/flow-next/docs/{teams.md,ralph.md,flowctl.md}` for spec vocabulary, renamed the sixth handover-object (`spec-completion-review`), added `migrate-rename` / `migrate-rollback` / Migration banner / Deprecated aliases sections to flowctl.md, and documented the `EPICS_FILE` -> `SPECS_FILE` config-env rename in ralph.md. Verified by `flowctl triage-skip` (verdict SHIP, mode triage_skip, reason docs-only 3 files).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: fd8f8a3c81281824e8f21d8a865eb8cbbd0ac1d7
+- Tests: flowctl triage-skip --base e5fcfa2 --task fn-43-rename-epic-spec-across-flow-next.13 --no-llm --json (verdict SHIP, mode triage_skip, reason docs-only 3 files)
 - PRs:
