@@ -78,8 +78,8 @@ Rewire all smoke tests to assert the new `flowctl spec *` surface. Add a separat
 - [ ] Top-level `flowctl show fn-X` smoke confirms NO new `flowctl spec show` subcommand was introduced.
 
 ## Done summary
-
+Rewired all 10 existing smoke scripts to canonical `flowctl spec*` surface (verb, --spec, --section spec, SPECS_FILE), replaced hardcoded `.flow/epics/<id>.json` reads with a probe helper, added `alias_smoke.sh` (20 assertions covering 7 high-value alias paths + FLOW_NO_DEPRECATION suppression) and `migration_smoke.sh` (45 assertions covering 13 migration scenarios + T4 banner-suppression matrix + future-version warning), wired both into `.github/workflows/test-flow-next.yml`, and added the R30 alias-vocabulary guard to `ci_test.sh` + `sync-codex.sh` Codex-mirror block (catches `flowctl epic*`, `--epic`, `--epics-file`, `--section epic`, `EPICS_FILE` outside legitimate alias / deprecation context).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 2713010930afb6b42ae6a90e6ac1162cf7e52026, 014330cdd49d9f81bde6692aa183955b9f4e8466, 0999956a16b2729c7500ddf0bb40822d0afdf4ea, cf56ecec41f133e4f22f77c3a9a1e4776e3f3c14, e3f633e4caebbaacbb58c87e36b3457c3a0be1b6
+- Tests: smoke_test.sh: 130/0, alias_smoke.sh: 20/0, migration_smoke.sh: 45/0, ci_test.sh: 58/0, make-pr_smoke_test.sh: 77/0, ralph_smoke_test.sh: 15/0, prospect_smoke_test.sh: 94/0
 - PRs:
