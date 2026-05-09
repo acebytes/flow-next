@@ -29,7 +29,7 @@ Flow-Next is an AI agent orchestration plugin. **Eighteen agent-native skills** 
 
 First-class on **Claude Code**, **OpenAI Codex** (CLI + Desktop), and **Factory Droid**. Also runs on **OpenCode** via the [community port](https://github.com/gmickel/flow-next-opencode).
 
-> 🆕 **v0.42.0 — PR-as-cognitive-aid.** New `/flow-next:make-pr` skill closes the gap between "all tasks done" and "human reviews the PR" — renders a reviewable PR body from nine flow-next input streams (epic spec with R-IDs, per-task `done_summary` + evidence commits, decisions / bug / architecture-patterns memory, glossary changes, strategy alignment, deferred review findings, the diff itself). Body sections include TL;DR, R-ID coverage table (R# → satisfying task → evidence commit), Critical changes (high-churn / cross-module / public-interface / security-sensitive / behavior-visible), Decisions, Memory, Glossary/strategy deltas, Open items, Where to look (reviewer-focus list). Mermaid codefences when the diff crosses ≥2 modules (max 3 diagrams × 12 nodes; markdown codefence — GitHub / GitLab / Gitea render natively). Default `--draft` if open items > 0 or under Ralph; `--ready` overrides. Uses `gh pr create --body-file` not heredoc (LLM-markdown safety — heredocs choke on backticks / `$` / dollar-paren). Backed by `flowctl epic export-cognitive-aid` plumbing (deterministic 9-stream JSON aggregation, reusable from any future skill / script). NOT Ralph-blocked — PR creation is the autonomous-loop terminus, Ralph defaults to `--draft` for human review. NO cross-model review of the body — each harness identifies critical changes from the structured input; `/flow-next:impl-review` already covers the *code itself*. [Full changelog](CHANGELOG.md).
+> 🆕 **v0.42.0 — PR-as-cognitive-aid.** New `/flow-next:make-pr` skill closes the gap between "all tasks done" and "human reviews the PR" — renders a reviewable PR body from nine flow-next input streams (spec with R-IDs, per-task `done_summary` + evidence commits, decisions / bug / architecture-patterns memory, glossary changes, strategy alignment, deferred review findings, the diff itself). Body sections include TL;DR, R-ID coverage table (R# → satisfying task → evidence commit), Critical changes (high-churn / cross-module / public-interface / security-sensitive / behavior-visible), Decisions, Memory, Glossary/strategy deltas, Open items, Where to look (reviewer-focus list). Mermaid codefences when the diff crosses ≥2 modules (max 3 diagrams × 12 nodes; markdown codefence — GitHub / GitLab / Gitea render natively). Default `--draft` if open items > 0 or under Ralph; `--ready` overrides. Uses `gh pr create --body-file` not heredoc (LLM-markdown safety — heredocs choke on backticks / `$` / dollar-paren). Backed by `flowctl spec export-cognitive-aid` plumbing (deterministic 9-stream JSON aggregation, reusable from any future skill / script). NOT Ralph-blocked — PR creation is the autonomous-loop terminus, Ralph defaults to `--draft` for human review. NO cross-model review of the body — each harness identifies critical changes from the structured input; `/flow-next:impl-review` already covers the *code itself*. [Full changelog](CHANGELOG.md).
 
 > 🌐 **[Visual overview at mickel.tech/apps/flow-next](https://mickel.tech/apps/flow-next)** — diagrams, examples, the full feature tour.
 
@@ -130,13 +130,13 @@ Idea → spec → tasks → ship. Branch in, branch out — pick the entry point
 | Command | What It Does |
 |---------|--------------|
 | `/flow-next:prospect` | Generate ranked candidate ideas grounded in the repo, upstream of `capture`/`interview`/`plan` |
-| `/flow-next:capture` | Synthesize conversation context into an epic spec (source-tagged, mandatory read-back) |
+| `/flow-next:capture` | Synthesize conversation context into a spec (source-tagged, mandatory read-back) |
 | `/flow-next:interview` | Deep spec refinement with lead-with-recommendation + confidence tiers + codebase-first investigation |
-| `/flow-next:plan` | Research codebase, create epic + dependency-ordered tasks |
+| `/flow-next:plan` | Research codebase, create spec + dependency-ordered tasks |
 | `/flow-next:work` | Execute tasks with re-anchoring + worker subagents + review gates |
 | `/flow-next:impl-review` | Cross-model implementation review (RepoPrompt, Codex, or Copilot) |
 | `/flow-next:plan-review` | Cross-model plan review |
-| `/flow-next:epic-review` | Epic-completion review gate — verify combined implementation matches spec |
+| `/flow-next:spec-completion-review` | Spec-completion review gate — verify combined implementation matches the spec (renamed from `/flow-next:epic-review` in 1.0.0; alias removed in 2.0.0) |
 | `/flow-next:resolve-pr` | Resolve GitHub PR review threads (fetch → triage → fix → reply → resolve via GraphQL) |
 | `/flow-next:audit` | Agent-native review of `.flow/memory/` entries against current code (Keep / Update / Consolidate / Replace / Delete) |
 | `/flow-next:memory-migrate` | Lift legacy flat memory files into the categorized schema; agent classifies each entry |
