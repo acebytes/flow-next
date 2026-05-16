@@ -2,6 +2,11 @@
 
 All notable changes to the flow-next.
 
+## [flow-next 1.1.1] - 2026-05-16
+
+### Fixed
+- **`install-codex.sh` now copies `templates/spec.md` (and any sibling top-level templates) to `~/.codex/templates/`.** 1.1.0 shipped the canonical spec template at `plugins/flow-next/templates/spec.md` and wired the `/flow-next:interview` skill to read it at runtime via `${CLAUDE_PLUGIN_ROOT}/templates/spec.md`, but the Codex installer only copied skill-scoped templates (ralph-init). Codex users on 1.1.0 hit a missing-file when invoking `/flow-next:interview --scope=business` on a new idea, because the NEW IDEA path resolves the template at install root. Discovered during the 1.1.0 dogfood-install check immediately post-release; patched + verified end-to-end. No Claude Code regression — Claude installs resolve `CLAUDE_PLUGIN_ROOT` to the plugin source tree where `templates/spec.md` always existed.
+
 ## [flow-next 1.1.0] - 2026-05-15
 
 ### Added

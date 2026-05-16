@@ -139,6 +139,22 @@ if [ -d "$CODEX_SRC/skills/flow-next-ralph-init/templates" ]; then
 fi
 
 # ====================
+# Top-level templates (canonical spec template + future siblings)
+# ====================
+# Skills resolve `${CLAUDE_PLUGIN_ROOT}/templates/spec.md` at runtime
+# (interview NEW IDEA path, CLAUDE.md cross-link). Without this copy,
+# Codex installs miss the canonical template and the symmetric-interview
+# new-spec path breaks. Mirrored by sync-codex.sh into $CODEX_SRC/templates/.
+if [ -d "$CODEX_SRC/templates" ]; then
+    for tpl in "$CODEX_SRC/templates/"*.md; do
+        [ -f "$tpl" ] || continue
+        cp "$tpl" "$CODEX_DIR/templates/"
+    done
+    TPL_COUNT=$(find "$CODEX_SRC/templates" -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')
+    [ "$TPL_COUNT" -gt 0 ] && echo -e "${GREEN}✓${NC} $TPL_COUNT top-level template(s) (spec.md + siblings)"
+fi
+
+# ====================
 # Plugin manifest
 # ====================
 if [ -f "$PLUGIN_DIR/.codex-plugin/plugin.json" ]; then
