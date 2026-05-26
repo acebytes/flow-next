@@ -4478,6 +4478,23 @@ def cmd_init(args: argparse.Namespace) -> None:
                 raw = {}
         except (json.JSONDecodeError, Exception):
             raw = {}
+        # Pre-merge migration (1.1.11): if user has legacy planSync.crossEpic
+        # and no canonical planSync.crossSpec, mirror the legacy value to
+        # canonical so the new default (False) doesn't silently flip the
+        # user's effective setting. Read precedence (1.1.3+) is "canonical
+        # wins on presence", so without this mirror, every upgrading user
+        # who had crossEpic set lost their cross-spec sync silently. Legacy
+        # key is kept readable through 1.x per the deprecation cadence.
+        ps = raw.get("planSync")
+        if (
+            isinstance(ps, dict)
+            and "crossEpic" in ps
+            and "crossSpec" not in ps
+        ):
+            ps["crossSpec"] = ps["crossEpic"]
+            actions.append(
+                "mirrored legacy planSync.crossEpic → canonical planSync.crossSpec"
+            )
         merged = deep_merge(get_default_config(), raw)
         if merged != raw:
             atomic_write_json(config_path, merged)
@@ -11975,10 +11992,15 @@ def _export_parse_acceptance_criteria(spec_text: str) -> list[dict[str, Any]]:
         body_end = len(spec_text)
     body = spec_text[body_start:body_end]
 
-    # Bullet pattern: `- **R<N>:** <text>`. Tolerate optional whitespace
-    # between the bullet marker and the bold token.
+    # Bullet pattern: `- **R<N>:** <text>` or `- **R<N><a-z>:** <text>`.
+    # Tolerate optional whitespace between the bullet marker and the bold token.
+    # The single-letter suffix form (`R4a`, `R4b`) lets capture-driven specs
+    # sub-scope criteria sharing a logical parent; siblings sort lexically
+    # (`R4` < `R4a` < `R4b` < `R5`) via Python's default string ordering.
+    # Multi-letter suffixes (`R4ab`) and separators (`R-4`) remain rejected
+    # by design — broader format support waits for a real need.
     bullet_re = re.compile(
-        r"^[-*]\s+\*\*(R\d+)\:?\*\*\s*:?\s*(.+?)$",
+        r"^[-*]\s+\*\*(R\d+[a-z]?)\:?\*\*\s*:?\s*(.+?)$",
         re.MULTILINE,
     )
     tag_re = re.compile(r"\[([^\]]+)\]\s*$")
@@ -12704,15 +12726,108 @@ def _export_strategy_alignment(
     return result
 
 
+def _export_resolve_memory_threshold(
+    epic_created_at: Optional[str],
+    task_created_ats: Optional[list[str]] = None,
+    branch_name: Optional[str] = None,
+    base_ref: Optional[str] = None,
+) -> tuple[str, str]:
+    """Resolve the memory-window lower bound to a YYYY-MM-DD threshold.
+
+    Returns ``(threshold, source)`` where ``source`` is one of:
+    ``"spec"``, ``"earliest_task"``, ``"branch_first_commit"``, or
+    ``""`` (no usable signal — caller falls back to "return all").
+
+    When ``base_ref`` is provided, the branch-first-commit step uses
+    ``git log {base_ref}..{branch_name}`` so only commits unique to the
+    feature branch are walked — without ``base_ref`` the helper would
+    walk the entire inherited mainline history and return the repo root
+    commit's date (Codex bot P2 on PR #147). Without ``base_ref`` the
+    helper falls back to ``git log {branch_name}`` as a best-effort
+    behavior; callers without a base context (e.g. unit tests on
+    detached fixtures) still get a usable threshold.
+
+    Fallback chain (fn-49.2):
+    1. ``epic_created_at`` — primary signal (spec metadata).
+    2. Earliest non-empty ``tasks[].created_at`` — deterministic given a
+       fixed task set; covers specs created via ``/flow-next:capture`` in
+       the same session as ``flowctl init`` (R3).
+    3. ``git log <branch_name> --reverse --format=%cI`` first commit —
+       deterministic given a fixed branch + git history; covers specs
+       where neither spec nor tasks carry timestamps.
+    4. ``""`` — caller returns all entries (graceful-degradation contract;
+       same as pre-fn-49.2 behavior for the no-signal case).
+
+    Each step is deterministic and the chain stops at the first success so
+    two consecutive runs against the same repo return the same threshold.
+    """
+    # Step 1: spec metadata.
+    if epic_created_at:
+        return (epic_created_at[:10], "spec")
+
+    # Step 2: earliest task created_at.
+    if task_created_ats:
+        candidates = [t[:10] for t in task_created_ats if t]
+        if candidates:
+            return (min(candidates), "earliest_task")
+
+    # Step 3: branch first commit (committer date, ISO 8601 strict).
+    #
+    # NOTE 1: do NOT use ``--max-count=1`` with ``--reverse``. ``--max-count``
+    # is a selection option applied BEFORE output ordering, so combined with
+    # ``--reverse`` it picks the most recent commit and then "reverses" a
+    # 1-element list (no-op) — returning the branch tip date instead of the
+    # root commit's date. Filtering at output time via ``splitlines()[0]``
+    # on the reversed stream is the deterministic way to grab the first
+    # commit. Caught by Codex bot P1 review on PR #147; regression locked by
+    # ``test_branch_first_commit_returns_root_not_tip`` in
+    # ``tests/test_memory_during_spec_null_safe.py``.
+    #
+    # NOTE 2: prefer ``git log {base_ref}..{branch_name}`` when ``base_ref``
+    # is available — without it, ``git log <branch>`` walks ALL commits
+    # reachable from the branch tip including inherited mainline history,
+    # so ``--reverse`` then ``splitlines()[0]`` returns the repository root
+    # commit's date (way too old). Caught by Codex bot P2 review on PR #147;
+    # regression locked by
+    # ``test_branch_first_commit_excludes_base_history`` in
+    # ``tests/test_memory_during_spec_null_safe.py``.
+    if branch_name:
+        if base_ref:
+            git_args = [
+                "log",
+                f"{base_ref}..{branch_name}",
+                "--reverse",
+                "--format=%cI",
+            ]
+        else:
+            git_args = ["log", branch_name, "--reverse", "--format=%cI"]
+        rc, out, _err = _export_run_git(git_args)
+        if rc == 0:
+            first_line = out.strip().splitlines()[0] if out.strip() else ""
+            if first_line:
+                return (first_line[:10], "branch_first_commit")
+
+    return ("", "")
+
+
 def _export_memory_during_epic(
     memory_dir: Path,
     epic_created_at: Optional[str],
+    task_created_ats: Optional[list[str]] = None,
+    branch_name: Optional[str] = None,
+    base_ref: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Aggregate memory entries written during the epic window.
+    """Aggregate memory entries written during the spec window.
 
-    Filters by `date >= epic_created_at` (YYYY-MM-DD prefix). Falls back
-    to "all entries in scoped categories" when `epic_created_at` is
-    missing — better than empty under the graceful-degradation contract.
+    Filters by ``date >= threshold`` (YYYY-MM-DD prefix). When
+    ``epic_created_at`` is null, ``_export_resolve_memory_threshold``
+    walks a deterministic fallback chain (earliest task → branch first
+    commit) so the window still approximates the spec lifetime instead
+    of degrading to "all entries ever written".
+
+    Falls back to "all entries in scoped categories" only when every
+    chain signal is missing — preserves the pre-fn-49.2 graceful-
+    degradation contract for the no-signal case.
     """
     result: dict[str, Any] = {
         "decisions": [],
@@ -12723,11 +12838,9 @@ def _export_memory_during_epic(
     if not memory_dir.is_dir():
         return result
 
-    # Date threshold.
-    threshold = ""
-    if epic_created_at:
-        # Accept full ISO timestamp or just YYYY-MM-DD prefix.
-        threshold = epic_created_at[:10]
+    threshold, _source = _export_resolve_memory_threshold(
+        epic_created_at, task_created_ats, branch_name, base_ref
+    )
 
     def _within_window(date_str: str) -> bool:
         if not threshold:
@@ -13021,6 +13134,12 @@ def cmd_spec_export_cognitive_aid(args: argparse.Namespace) -> None:
     # --- Tasks ---
     tasks_dir = flow_dir / TASKS_DIR
     task_entries: list[dict[str, Any]] = []
+    # Parallel collection of task `created_at` timestamps for the memory
+    # time-window fallback chain (fn-49.2). Kept separate from
+    # `task_entries` because the public export schema doesn't expose
+    # task creation timestamps directly; the fallback consumer reads
+    # this list and walks for the min.
+    task_created_ats: list[str] = []
     if tasks_dir.exists():
         for task_file in sorted(tasks_dir.glob(f"{spec_id}.*.json")):
             task_id = task_file.stem
@@ -13033,6 +13152,9 @@ def cmd_spec_export_cognitive_aid(args: argparse.Namespace) -> None:
                 raise
             if "id" not in task_data:
                 continue
+            tc = task_data.get("created_at")
+            if isinstance(tc, str) and tc:
+                task_created_ats.append(tc)
 
             # Read the task spec markdown to get satisfies + done_summary.
             task_spec_path = tasks_dir / f"{task_id}.md"
@@ -13091,9 +13213,18 @@ def cmd_spec_export_cognitive_aid(args: argparse.Namespace) -> None:
     }
 
     # --- Memory during spec lifecycle ---
+    # fn-49.2: pass earliest-task and branch-name fallback inputs so the
+    # time-window filter approximates the spec lifetime even when
+    # `spec.created_at` is null (e.g. specs created via
+    # `/flow-next:capture` in the same session as `flowctl init`, or
+    # pre-timestamp-population specs).
     memory_dir = flow_dir / MEMORY_DIR
     memory_during_epic = _export_memory_during_epic(
-        memory_dir, spec_data.get("created_at")
+        memory_dir,
+        spec_data.get("created_at"),
+        task_created_ats=task_created_ats,
+        branch_name=spec_data.get("branch_name") or None,
+        base_ref=base_ref,
     )
 
     # --- Glossary diff ---
