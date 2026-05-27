@@ -2,6 +2,13 @@
 
 All notable changes to the flow-next.
 
+## [flow-next 1.3.3] - 2026-05-27
+
+### Fixed
+- **Scout `.clawpatch/` enrichment now resolves `flowctl` as a dispatched subagent** — fn-50.3 added `repo-scout`/`context-scout` Step 0 calls to `flowctl repo-map list --json`, but when these agents run as dispatched subagents they may not inherit `CLAUDE_PLUGIN_ROOT`/`DROID_PLUGIN_ROOT`, so `FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/flowctl"` resolved to a broken `/scripts/flowctl` → `repo-map` failed → the scout silently grep-degraded and `features_anchored` never fired even with a populated `.clawpatch/`. Both scouts' Step 0 now add `[ -x "$FLOWCTL" ] || FLOWCTL=".flow/bin/flowctl"`, so a `/flow-next:setup`-installed repo resolves the bundled copy regardless of subprocess env. Surfaced by live end-to-end testing (mapping flow-next's own repo via `--source=agent` → 9 features, then exercising the scout enrichment).
+- **`scripts/sync-codex.sh` agent-body FLOWCTL injection is now idempotent** — the fn-50.6 rewrite injected the `.flow/bin/flowctl` fallback unconditionally after the Codex `FLOWCTL=` line; with the canonical now carrying that fallback too, the mirror got a duplicate line. The awk now skips injection when the next line is already the fallback (END-injects only when `FLOWCTL=` is the last line). repo-scout / context-scout / worker mirror tomls carry exactly one fallback each; sync is byte-idempotent.
+- **`test_scout_fallback_contract.py` plumbing check is hermetic** — it now runs `flowctl repo-map list` in a throwaway git repo instead of the in-repo `tests/fixtures/scout-without-clawpatch/` fixture. `repo-map` resolves `.clawpatch/` from git toplevel, so the fixture subdir couldn't isolate from a real `.clawpatch/` created by local dogfooding at repo root (the test failed locally though it passed in CI, where `.clawpatch/` is gitignored and absent).
+
 ## [flow-next 1.3.2] - 2026-05-27
 
 ### Added
