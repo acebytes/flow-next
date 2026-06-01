@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-51-flow-next-drive-surface-aware-ui",
+  "created_at": "2026-06-01T12:31:09.848079Z",
+  "depends_on_epics": [],
+  "id": "fn-51-flow-next-drive-surface-aware-ui",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-51-flow-next-drive-surface-aware-ui.md",
+  "status": "open",
+  "title": "flow-next-drive: surface-aware UI automation (rename browser skill + driver ladder)",
+  "updated_at": "2026-06-01T12:31:47.333584Z"
+}
