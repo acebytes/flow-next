@@ -1,6 +1,11 @@
 {
   "branch_name": "fn-53-flow-nextqa-live-app-real-user-qa-pass",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
   "created_at": "2026-06-01T13:33:10.484356Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
   "depends_on_epics": [
     "fn-51-flow-next-drive-surface-aware-ui"
   ],
@@ -11,5 +16,15 @@
   "spec_path": ".flow/specs/fn-53-flow-nextqa-live-app-real-user-qa-pass.md",
   "status": "open",
   "title": "/flow-next:qa \u2014 live-app real-user QA pass derived from the spec",
-  "updated_at": "2026-06-02T15:23:05.352120Z"
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "id": "FLOW-4",
+    "identifier": "FLOW-4",
+    "lastSyncedAt": "2026-06-03T21:46:11.383310Z",
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": "https://linear.app/gmickel/issue/FLOW-4"
+  },
+  "updated_at": "2026-06-03T21:46:11.383464Z"
 }

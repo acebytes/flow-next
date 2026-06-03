@@ -1,13 +1,28 @@
 {
   "branch_name": "fn-51-flow-next-drive-surface-aware-ui",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
   "created_at": "2026-06-01T12:31:09.848079Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
   "depends_on_epics": [],
   "id": "fn-51-flow-next-drive-surface-aware-ui",
   "next_task": 1,
   "plan_review_status": "unknown",
   "plan_reviewed_at": null,
   "spec_path": ".flow/specs/fn-51-flow-next-drive-surface-aware-ui.md",
-  "status": "open",
+  "status": "done",
   "title": "flow-next-drive: surface-aware UI automation (rename browser skill + driver ladder)",
-  "updated_at": "2026-06-01T12:31:47.333584Z"
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "id": "FLOW-2",
+    "identifier": "FLOW-2",
+    "lastSyncedAt": "2026-06-03T21:46:10.088576Z",
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": "https://linear.app/gmickel/issue/FLOW-2"
+  },
+  "updated_at": "2026-06-03T21:46:10.088780Z"
 }

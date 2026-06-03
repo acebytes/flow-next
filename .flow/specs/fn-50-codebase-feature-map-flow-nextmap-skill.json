@@ -12,7 +12,17 @@
   "plan_review_status": "ship",
   "plan_reviewed_at": "2026-05-26T15:04:11.074824Z",
   "spec_path": ".flow/specs/fn-50-codebase-feature-map-flow-nextmap-skill.md",
-  "status": "open",
+  "status": "done",
   "title": "Codebase feature map: /flow-next:map skill + scout enrichment + prime nudge",
-  "updated_at": "2026-05-26T15:04:11.074947Z"
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "id": "FLOW-1",
+    "identifier": "FLOW-1",
+    "lastSyncedAt": "2026-06-03T21:46:09.486685Z",
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": "https://linear.app/gmickel/issue/FLOW-1"
+  },
+  "updated_at": "2026-06-03T21:46:09.486827Z"
 }

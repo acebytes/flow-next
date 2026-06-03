@@ -15,7 +15,7 @@
   },
   "tracker": {
     "conflictTiebreak": "always-ask",
-    "enabled": false,
+    "enabled": true,
     "perEvent": {
       "capture": "off",
       "completionReview": "off",
@@ -31,12 +31,12 @@
     "perTracker": {
       "labelMap": {},
       "priorityMap": {},
-      "projectId": null,
-      "teamId": null
+      "projectId": "98736b8e-2fa4-4d61-95db-0a4829f6aabf",
+      "teamId": "7c086b79-e7fc-4eee-8d2d-b2dd60eee166"
     },
-    "provenance": null,
+    "provenance": "discovery ceremony 2026-06-03; confirmed by Gordon (@gmickel); signals: Linear MCP present; team Flow Next (FLOW) / project Development",
     "staleAfterHours": 24,
-    "type": null,
+    "type": "linear",
     "version": 1
   }
 }
