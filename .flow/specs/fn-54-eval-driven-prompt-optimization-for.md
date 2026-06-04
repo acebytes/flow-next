@@ -39,6 +39,7 @@ No runtime API. The "contract" is the harness layout + scoring procedure in `age
 - **Overfitting / eval-gaming:** ≤6 evals, non-gameable, varied frozen inputs (the eval-guide rules).
 - **Cost:** the loop itself is token-heavy (N runs × experiments). It's an offline investment that pays back on high-frequency prompts; not worth it for once-a-release skills. Bulk sweeps are workflow/background-shaped.
 - **Side-effectful skills** (`work`, `ralph`, `setup`, live `tracker-sync`/`make-pr`/`resolve-pr`) are poor loop targets (state mutation, external calls) — covered by smoke tests, not this.
+- **Test bed = representative external repos, NOT flow-next-on-itself.** Repo-context skills (scouts, `plan`, code-aware `capture`, the reviews) must run against a representative app corpus — primary `~/work/DocIQ-Sphere` (~442k LOC; TS/TSX + Python + XSD schemas + Docker) + ≥1 contrasting repo for variety. flow-next is unconventional (one ~24k-LOC `flowctl.py` + markdown skills); tuning a scout against it **overfits** and never exercises multi-file app structure. flow-next-on-itself is acceptable ONLY for repo-agnostic output-FORMAT mutations (e.g. the repo-scout output-budget win), never for accuracy/coverage evals or prompt-trims.
 
 ## Acceptance Criteria
 <!-- scope: both -->
@@ -51,6 +52,7 @@ No runtime API. The "contract" is the harness layout + scoring procedure in `age
 - **R6:** **Heavy prompts** (`make-pr` ~31k, `audit`, `interview`, `prospect`) trimmed via the prompt-trim lever with strong **behavioral** evals (kept output unchanged), for input-token savings every invocation. [paraphrase]
 - **R7:** Each kept mutation is **promoted to ship** via the normal release pipeline (apply canonical → `sync-codex` → version bump → CHANGELOG/docs-site → tag). `opt/*` branches stay experimental until promoted; nothing auto-merges. [inferred]
 - **R8:** The autoresearch tool is **NOT vendored** as a flow-next skill/command — it stays external, bridged only by `agent_docs/optimizing-skills.md`. [user]
+- **R9:** Repo-context skill optimization (scouts, `plan`, code-aware `capture`, reviews) is evaluated against a **representative external repo corpus** — primary `~/work/DocIQ-Sphere` (~442k LOC, multi-stack) + ≥1 contrasting repo — **not flow-next-on-itself** for accuracy/coverage evals or prompt-trims; flow-next-on-itself is permitted only for repo-agnostic output-format mutations. The `~/work/slop-testbed` clean-vs-slop repo remains the frozen eval suite for the review skills. [user]
 
 ## Boundaries
 <!-- scope: business -->
@@ -87,3 +89,4 @@ Serves token efficiency + accuracy of the core agent loop without changing the a
 | R6 | fn-54.M (TBD) |
 | R7 | fn-54.M (TBD) |
 | R8 | fn-54.M (TBD) |
+| R9 | fn-54.M (TBD — representative-repo corpus, DocIQ-Sphere primary) |
