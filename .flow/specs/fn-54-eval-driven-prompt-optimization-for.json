@@ -1,0 +1,23 @@
+{
+  "branch_name": "fn-54-eval-driven-prompt-optimization-for",
+  "created_at": "2026-06-04T20:35:03.796497Z",
+  "depends_on_epics": [],
+  "id": "fn-54-eval-driven-prompt-optimization-for",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-54-eval-driven-prompt-optimization-for.md",
+  "status": "open",
+  "title": "Eval-driven prompt optimization for flow-next skills & agents",
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "id": null,
+    "identifier": null,
+    "lastSyncedAt": null,
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": null
+  },
+  "updated_at": "2026-06-04T20:35:04.065414Z"
+}
