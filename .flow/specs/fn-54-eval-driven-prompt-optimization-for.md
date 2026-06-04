@@ -7,6 +7,7 @@
 > user: "at the end of the day i think we can probably tweak a lot of our core skills without losing accuracy"
 > user: "i dont [think] this optimize skill should live inside flow-next instead we should have a detailed instruction file inside flow-next on how to do this that points to the other repo … and paths on my local machine, where we spin up such experiments"
 > user: "the accuracy-critical ones, need to take into account that the user can override the spec.md etc"
+> user: "may take a more complicated repo than flow-next itself, maybe /Users/gordon/work/DocIQ-Sphere or so"
 > [context: external methodology = Karpathy "autoresearch" — binary evals, baseline, one mutation, keep-if-better ratchet. Cloned at ~/repos/autoresearch-skill (SKILL.md + eval-guide.md).]
 
 ## Goal & Context
