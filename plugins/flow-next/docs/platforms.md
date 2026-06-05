@@ -1,6 +1,6 @@
 # Other Platforms
 
-Flow-next is a first-class citizen on Claude Code (canonical), OpenAI Codex (pre-built mirror), and Factory Droid (native cross-platform patterns). A community port exists for OpenCode.
+Flow-next is a first-class citizen on Claude Code (canonical), OpenAI Codex (pre-built mirror), and Factory Droid (native cross-platform patterns). A community port exists for OpenCode. xAI **Grok Build** reads the Claude Code plugin with zero config — skills and hooks load (confirmed via `grok inspect`) — but whether flow-next's **multi-agent flows** run is **unverified** (see [Grok Build](#grok-build-claude-code-compatibility) below).
 
 ## Install matrix
 
@@ -9,6 +9,7 @@ Flow-next is a first-class citizen on Claude Code (canonical), OpenAI Codex (pre
 | Claude Code | `/plugin marketplace add gmickel/flow-next-marketplace && /plugin install flow-next` | `.claude-plugin/plugin.json` | Canonical environment |
 | Factory Droid | `droid plugin marketplace add https://github.com/gmickel/flow-next && droid plugin install flow-next` (in Droid CLI) | `.claude-plugin/plugin.json` (Droid auto-translates Claude Code plugin format) | Native cross-platform patterns |
 | OpenAI Codex | `git clone https://github.com/gmickel/flow-next.git && cd flow-next && ./scripts/install-codex.sh` | `.codex-plugin/plugin.json` | Pre-built mirror under `plugins/flow-next/codex/` |
+| Grok Build (xAI) | Auto-discovered if installed in Claude Code (run `grok inspect`); or add `gmickel/flow-next` as a `[[marketplace.sources]]` entry. **Not** `grok plugin install <repo>`. | `.claude-plugin/plugin.json` (read via Claude Code compat) | Skills + hooks load (confirmed). Multi-agent flows **unverified** — see below |
 | OpenCode | See [flow-next-opencode](https://github.com/gmickel/flow-next-opencode) | n/a | Community port |
 
 > The canonical install path on Claude Code is the marketplace. Direct `--plugin-dir` (`claude --plugin-dir ./plugins/flow-next`) is the development path.
@@ -144,6 +145,35 @@ chmod +x .flow/bin/flowctl
 - Ralph autonomous mode is limited — hooks intercept Bash only (not Edit/Write), no `SubagentStop` support.
 - `claude-md-scout` is auto-renamed to `agents-md-scout` (CLAUDE.md → AGENTS.md patching).
 - Global install prompts (`/prompts:*`) are global-only (`~/.codex/prompts/`); native plugin avoids this limitation.
+
+## Grok Build (Claude Code compatibility)
+
+[xAI Grok Build](https://x.ai/cli) (the `grok` CLI) advertises zero-config Claude Code compatibility — per [xAI docs](https://docs.x.ai/build/features/skills-plugins-marketplaces) it *"automatically reads Claude Code marketplaces, plugins, skills, MCPs, agents, hooks, and instruction files."* If flow-next is already installed in Claude Code, Grok picks it up with no extra setup.
+
+### Install (pick one)
+
+- **Already in Claude Code?** Nothing to do — run `grok inspect` and you'll see flow-next's skills + hook loaded.
+- **Add as a marketplace source:** flow-next's repo root is a Claude Code **marketplace** (`.claude-plugin/marketplace.json`), so register `gmickel/flow-next` via `[[marketplace.sources]]` in `~/.grok/config.toml` (or the TUI **Marketplace** tab, opened with `/plugins`), then enable the `flow-next` plugin.
+- **Local / dev:** `grok --plugin-dir /path/to/flow-next/plugins/flow-next`.
+
+> **Do NOT run `grok plugin install https://github.com/gmickel/flow-next`.** That is the **single-plugin** git installer; the repo root is a **marketplace** (the plugin is nested at `plugins/flow-next/`), so it errors `no plugins found in the source (no plugin.json or convention components)` — there is no single plugin at the repo root. This is the same reason you don't `claude plugin install` a marketplace repo. Use the marketplace / auto-read path above.
+
+### What's confirmed (Grok 0.2.27 alpha, via `grok inspect`)
+
+- All flow-next **skills** load as `plugin: flow-next` (and appear as `/<skill-name>` slash commands).
+- The Ralph-guard **hook** loads (`file → plugin: flow-next`).
+- **MCP servers** resolve (e.g. RepoPrompt, linear-server).
+- Discovery used the **Claude Code plugin install** directly — `Marketplaces (0)`, no Grok-side config.
+
+### Open question — agents / multi-agent flows are UNVERIFIED
+
+The docs say Grok reads Claude Code **agents**, but `grok inspect` (0.2.27 alpha) surfaced **only the 3 builtin agents** (`general-purpose`, `explore`, `plan`) and reported **`1 agents`** for the flow-next plugin — not flow-next's **21 subagents** (`worker`, the `*-scout`s, `pr-comment-resolver`, …). flow-next's engine dispatches those by `subagent_type`, so the **fan-out skills** — `/flow-next:work`, `/flow-next:plan`, `/flow-next:prime`, `/flow-next:prospect`, `/flow-next:resolve-pr` — depend on them resolving.
+
+This is a **claim-vs-observed contradiction** that `inspect` alone can't settle (loaded-but-unlisted vs not-registered). **Until a functional run confirms subagent dispatch on Grok, treat the fan-out skills as untested there.** Single-context skills that don't spawn subagents (`/flow-next` task/spec management, `/flow-next:capture`, `/flow-next:interview`, `/flow-next:make-pr`, `/flow-next:tracker-sync`) are the safe subset.
+
+**Ralph autonomous mode** is likewise unverified — the guard hook loads, but Grok's hook lifecycle + matcher surface differ from Claude Code's. Treat as experimental.
+
+> **Status (Grok 0.2.27 alpha):** discovery + skill/hook loading confirmed; agent registration looks incomplete in `inspect` (contradicts the docs' "reads agents" claim); multi-agent dispatch + Ralph behavior need a functional smoke before flow-next claims Grok support. Re-assess on the next Grok release / once subagent behavior is confirmed.
 
 ## Windows + Copilot review backend
 
