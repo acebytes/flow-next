@@ -2,11 +2,16 @@
 
 > **Loaded only when delegation MAY be active.** `phases.md` / `SKILL.md` read
 > this file ONLY after the cheap value-check resolves `delegation_active=true`
-> (arg `delegate:codex` / `delegate:local` > config `work.delegate` > default
-> OFF). With delegation off — the default — neither this file nor any gate below
-> ever runs; the work flow is byte-identical to today. This is the
-> progressive-disclosure contract (R3): mechanics live here, the default path
-> stays a single `flowctl config get work.delegate` value-check.
+> (host is Claude Code AND — arg `delegate:codex` / `delegate:local` > config
+> `work.delegate` > default OFF). With delegation off — the default — neither this
+> file nor any gate below ever runs; the work flow is byte-identical to today.
+> **On a non-Claude-Code host (Codex / Droid / OpenCode) the value-check resolves
+> FALSE, so this reference is never read into context there** — the cheap Phase 0
+> `host_is_claude_code` subset short-circuits *before* any load; Gate 1 below stays
+> the authoritative full platform check (defense in depth, e.g. an inherited
+> `CLAUDECODE` or an `OPENCODE_*`-only marker). This is the progressive-disclosure
+> contract (R3): mechanics live here, the default path stays a single cheap
+> value-check.
 
 This reference is the **host-side** substrate. The pre-flight gates + one-time
 consent run **once, in the host work skill** (the orchestrator), BEFORE the
@@ -87,8 +92,14 @@ fi
 
 ### Gate 1 — Platform gate (orchestrator is Claude Code)
 
-Enable delegation ONLY when the orchestrator is **Claude Code**. Pinned probe
-(verified against the Claude Code / Droid / OpenCode env markers at build):
+Enable delegation ONLY when the orchestrator is **Claude Code**. The cheap Phase 0
+`host_is_claude_code` check (`phases.md` / `SKILL.md`) already short-circuits the
+common non-Claude case *before* this reference is loaded, so on Codex / Droid /
+OpenCode this gate never runs (the file isn't read). This gate is the
+**authoritative full check** — it ADDS the `OPENCODE_*` env scan and catches the
+residual edge the cheap subset can't (e.g. a `codex` run that inherited
+`CLAUDECODE` from a parent Claude Code shell). Pinned probe (verified against the
+Claude Code / Droid / OpenCode env markers at build):
 
 - the Claude-Code marker **`CLAUDECODE`** is present, AND
 - **`DROID_PLUGIN_ROOT`** is unset (Droid → off; Droid exposes

@@ -27,6 +27,18 @@ path.** With delegation off (the default), it resolves to a no-op and the rest
 of `phases.md` is byte-identical to before (R1/R3).
 
 ```bash
+# Cheap host short-circuit FIRST — delegation is Claude-Code-only. On a non-Claude
+# orchestrator (Codex / Droid / OpenCode) this resolves delegation OFF *before* the
+# ~45k references/codex-delegation.md is ever read, so that reference never loads
+# into a non-Claude host's context just to be disabled by Gate 1. (Gate 1 in the
+# reference stays the authoritative full platform check — incl. the OPENCODE_* env
+# scan; this is its cheap pre-check subset, run pre-load.)
+host_is_claude_code() {
+ [ -n "${CLAUDECODE:-}" ] || return 1 # not Claude Code → off
+ [ -z "${DROID_PLUGIN_ROOT:-}" ] || return 1 # Droid → off (compat alias not keyed)
+ [ -z "${OPENCODE:-}" ] || return 1 # OpenCode → off
+ return 0
+}
 # Single value-check — same shape as the tracker-sync touchpoints (SKILL.md).
 # Guard a missing .flow/: a fresh repo / idea-or-markdown input has not been
 # `flowctl init`ed yet (that happens in Phase 1), and `config get` errors on an
@@ -37,8 +49,9 @@ if [ -d .flow ]; then
 else
  DELEGATE_CFG=false
 fi
-# delegation_active = (arg delegate:codex | DELEGATE_CFG == "codex") && not arg delegate:local
-# The generic "use codex" is NOT the token — it stays mapped to the review backend.
+# delegation_active = host_is_claude_code && (arg delegate:codex | DELEGATE_CFG == "codex") && not arg delegate:local
+# On a non-Claude-Code host delegation_active is FALSE here — codex-delegation.md
+# is never read. The generic "use codex" is NOT the token — review backend.
 ```
 
 If `delegation_active` is **false** (the default), do nothing more here and run

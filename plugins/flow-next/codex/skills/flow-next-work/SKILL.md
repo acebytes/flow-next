@@ -180,6 +180,16 @@ computes `delegation_active` ONCE, before the per-task loop:
 
 ```bash
 # Default-path bloat = this one value-check. Nothing else runs when off.
+# Cheap host short-circuit FIRST — delegation is Claude-Code-only. On a non-Claude
+# orchestrator (Codex / Droid / OpenCode) delegation_active is FALSE here, so the
+# ~45k references/codex-delegation.md is NEVER read into context just to be
+# disabled by Gate 1 (which stays the authoritative full platform check).
+host_is_claude_code() {
+ [ -n "${CLAUDECODE:-}" ] || return 1 # not Claude Code → off
+ [ -z "${DROID_PLUGIN_ROOT:-}" ] || return 1 # Droid → off (compat alias not keyed)
+ [ -z "${OPENCODE:-}" ] || return 1 # OpenCode → off
+ return 0
+}
 # Guard a missing .flow/ (fresh repo / idea or markdown input, not yet `flowctl
 # init`ed) — `config get` errors on an absent .flow/; treat it as delegation OFF.
 if [ -d .flow ]; then
@@ -187,10 +197,11 @@ if [ -d .flow ]; then
 else
  DELEGATE_CFG=false
 fi
-# delegation_active = (arg delegate:codex | DELEGATE_CFG == "codex") && not arg delegate:local
+# delegation_active = host_is_claude_code && (arg delegate:codex | DELEGATE_CFG == "codex") && not arg delegate:local
 # if delegation_active → read references/codex-delegation.md and run the host
 # pre-flight gates + one-time consent ONCE, before the loop (phases.md Phase 1.5).
-# else → standard in-session execution, unchanged, zero new steps.
+# else → standard in-session execution, unchanged, zero new steps (non-Claude host
+# short-circuits here — the reference is never read).
 ```
 
 When `delegation_active`, the host (NOT the worker agent) reads

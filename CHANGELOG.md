@@ -2,6 +2,11 @@
 
 All notable changes to the flow-next.
 
+## [flow-next 1.7.1] - 2026-06-05
+
+### Changed
+- **Codex implementation-delegation now short-circuits *cheaply* on non-Claude hosts — the ~45k delegation reference is never loaded into a Codex / Droid / OpenCode orchestrator's context.** The delegation platform gate (orchestrator must be Claude Code) already disabled delegation on other hosts, but it ran as Gate 1 inside `references/codex-delegation.md` — *after* the host had already read that reference. So a user with `work.delegate=codex` set who then ran `/flow-next:work` **inside Codex** pulled the whole reference into context just to have Gate 1 turn delegation off. The cheap Phase 0 value-check now ANDs in a `host_is_claude_code` check (`CLAUDECODE` set AND no `DROID_PLUGIN_ROOT` AND no `OPENCODE`), so `delegation_active` resolves `false` on a non-Claude host **before** the reference is ever read. **No change for Claude Code users** — the path is byte-identical when `CLAUDECODE` is set. Gate 1 stays the authoritative full platform check (it adds the `OPENCODE_*` env scan and catches the residual inherited-`CLAUDECODE` edge); the Phase 0 check is its cheap pre-load subset. Canonical-only edit (`phases.md` + `SKILL.md` + reference header); Codex mirror regenerated. New drift-proof tests extract + execute the shipped `host_is_claude_code` bash under controlled env (`test_codex_delegation_gates.py`).
+
 ## [flow-next 1.7.0] - 2026-06-05
 
 ### Added

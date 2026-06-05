@@ -95,6 +95,16 @@ class CodexDelegationGateExecution(unittest.TestCase):
         )
         cls.platform_fn = _extract_bash_func(cls.ref_text, "platform_gate_ok")
         cls.recursion_fn = _extract_bash_func(cls.ref_text, "not_inside_codex_sandbox")
+        # The cheap Phase 0 host short-circuit lives in phases.md/SKILL.md (it must
+        # resolve delegation OFF on a non-Claude host BEFORE the reference is read,
+        # so it cannot live in the reference itself). Extract + execute the shipped
+        # phases.md copy.
+        phases_text = (
+            PHASES_MD.read_text(encoding="utf-8")
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+        )
+        cls.host_fn = _extract_bash_func(phases_text, "host_is_claude_code")
 
     def _run(self, func_def: str, call: str, env: dict) -> int:
         """Source the extracted function, call it, return its exit code."""
@@ -123,6 +133,47 @@ class CodexDelegationGateExecution(unittest.TestCase):
     def test_platform_gate_eligible_on_claude_code(self) -> None:
         rc = self._run(self.platform_fn, "platform_gate_ok", {"CLAUDECODE": "1"})
         self.assertEqual(rc, 0, "Claude Code (CLAUDECODE set, no Droid/OpenCode) must be eligible")
+
+    # ── Phase 0 cheap host short-circuit (rc 0 = Claude Code = eligible) ────
+    # The pre-LOAD gate: delegation must resolve OFF on a non-Claude host BEFORE
+    # the ~45k reference is read into context (not just after, via Gate 1).
+
+    def test_host_short_circuit_eligible_on_claude_code(self) -> None:
+        rc = self._run(self.host_fn, "host_is_claude_code", {"CLAUDECODE": "1"})
+        self.assertEqual(rc, 0, "Claude Code host must pass the cheap Phase 0 check")
+
+    def test_host_short_circuit_off_without_claudecode(self) -> None:
+        # The case this change targets: work.delegate=codex set, but work runs IN
+        # Codex — CLAUDECODE unset → cheap check fails → reference never loaded.
+        rc = self._run(self.host_fn, "host_is_claude_code", {})
+        self.assertNotEqual(
+            rc, 0, "non-Claude host (no CLAUDECODE) must short-circuit OFF pre-load"
+        )
+
+    def test_host_short_circuit_off_on_droid(self) -> None:
+        rc = self._run(
+            self.host_fn,
+            "host_is_claude_code",
+            {"CLAUDECODE": "1", "DROID_PLUGIN_ROOT": "/some/droid/root"},
+        )
+        self.assertNotEqual(rc, 0, "Droid must short-circuit OFF pre-load")
+
+    def test_host_short_circuit_off_on_opencode(self) -> None:
+        rc = self._run(
+            self.host_fn, "host_is_claude_code", {"CLAUDECODE": "1", "OPENCODE": "1"}
+        )
+        self.assertNotEqual(rc, 0, "OpenCode must short-circuit OFF pre-load")
+
+    def test_host_short_circuit_eligible_with_codex_sandbox_auto(self) -> None:
+        # Ralph's review-backend knob must not flip the cheap host check.
+        rc = self._run(
+            self.host_fn,
+            "host_is_claude_code",
+            {"CLAUDECODE": "1", "CODEX_SANDBOX": "auto"},
+        )
+        self.assertEqual(
+            rc, 0, "CODEX_SANDBOX=auto (Ralph knob) must leave the cheap host check ELIGIBLE"
+        )
 
     def test_platform_gate_eligible_with_codex_sandbox_auto(self) -> None:
         # The load-bearing Ralph case: CODEX_SANDBOX=auto is the review-backend
@@ -255,6 +306,16 @@ class CodexDelegationProseContract(unittest.TestCase):
     def test_skill_points_to_reference(self) -> None:
         self.assertIn("references/codex-delegation.md", self.skill)
         self.assertIn("references/codex-delegation.md", self.phases)
+
+    def test_phase0_host_short_circuit_documented(self) -> None:
+        # Delegation is Claude-Code-only and the cheap Phase 0 check must gate
+        # delegation_active so the reference is NEVER read on a non-Claude host
+        # (Codex / Droid / OpenCode). Both host skill files carry the check, ANDed
+        # into the predicate; the reference header states it is not read there.
+        for src in (self.phases, self.skill):
+            self.assertIn("host_is_claude_code", src)
+            self.assertRegex(src, r"host_is_claude_code\s*&&")
+        self.assertIn("never read into context", self.ref)
 
     def test_input_bare_prompt_capture_documented(self) -> None:
         self.assertIn("INPUT_WAS_BARE_PROMPT", self.phases)
