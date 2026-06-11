@@ -40,7 +40,7 @@ The fn-43 epic→spec rename + alias deprecation timeline. The single highest-le
 
 ### Ralph autonomous mode
 
-The overnight loop. Receipt-based proof-of-work gates every state transition; multi-model review at every handover; auto-block stuck tasks; iteration cap. Differentiator from "ralph-wiggum"-style autonomous loops that run open-loop without quality gates.
+The autonomy track — now a three-loop suite (1.13.0/1.14.0). **Pilot + land are the default path**: pilot builds (ready spec → plan → reviews → work → draft PR, host `/loop`/`/goal` drives the ticks), land ships (draft PR → CI-fixed → review-converged → gated merge → spec close → release-follow); run concurrently in separate clones they form the full assembly line, with the readiness gate / tracker board as the consent boundary. Ralph remains the hardened harness for fully planned specs: fresh session per iteration, hook-enforced guardrails, receipts on disk — for runs that outlast a session. Quality discipline is invariant across all three: multi-model review at every handover, don't-thrash reflexes (two-strike unready / auto-block / bounded CI fixes), evidence over narration. Differentiator from "ralph-wiggum"-style autonomous loops that run open-loop without quality gates. (Track name kept for spec-tag stability; it covers the whole loop suite.)
 
 ### flow-swarm preparation
 

@@ -236,9 +236,19 @@ Full command reference (every flag, every default) in [`docs/flowctl.md`](plugin
 
 ---
 
-## Ralph (autonomous mode)
+## Autonomous loops
 
-Run overnight. Fresh context per iteration + multi-model review gates + auto-block stuck tasks.
+The default path is the **pilot + land pipeline** — in-session, host-driven, zero scaffold:
+
+```bash
+flowctl spec ready fn-12          # bless work (or move its issue on the tracker board)
+/loop 10m /flow-next:pilot        # build loop: ready spec → plan → reviews → work → draft PR
+/loop 30m /flow-next:land         # ship loop: draft PR → CI green → reviews converged → merged → released
+```
+
+Run both concurrently — two instances, **separate clones** — for the full assembly line: board → pilot → draft PR → land → released. 📖 **[Going autonomous](https://flow-next.dev/autonomous/overview)**
+
+**Ralph** is the hardened harness for **fully planned** specs (it never plans): fresh session per iteration, hook-enforced guardrails, receipts on disk — for runs that outlast a session.
 
 ```bash
 /flow-next:ralph-init           # One-time setup
@@ -246,8 +256,6 @@ scripts/ralph/ralph.sh          # Run from terminal
 ```
 
 📖 **[Ralph deep dive](plugins/flow-next/docs/ralph.md)** · **[Ralph TUI](flow-next-tui/)** (`bun add -g @gmickel/flow-next-tui`)
-
-Prefer pilot when you want the host to own the loop in-session — `/loop 10m /flow-next:pilot` or a `/goal` with a `PILOT_VERDICT=NO_WORK` stop condition; same pipeline, verdicts instead of receipts.
 
 ---
 
