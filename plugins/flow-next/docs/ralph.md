@@ -172,10 +172,11 @@ Anthropic's official ralph-wiggum uses a Stop hook to keep Claude in the same se
 
 ### Host-driven loop vs Ralph
 
-`/flow-next:pilot` is the in-session alternative to Ralph: one invocation is one tick, and the host's `/loop` or `/goal` owns repetition.
+**Pilot + land are the default autonomy path** — `/flow-next:pilot` builds (ready spec → draft PR, in-session, host `/loop` / `/goal` owns repetition) and `/flow-next:land` ships (draft PR → merged + released). Ralph is the **hardened harness** for the work segment: it consumes specs that are already **fully planned** (its loop iterates plan-review → work → impl-review → completion review — it never runs the planning fan-out), trades in-session convenience for fresh-session isolation + hook-enforced guardrails, and needs no host loop primitive at all (cron-able on a headless server). Reach for it when a run outlasts a session (`/loop` jobs expire after 7 days) or when prose guardrails aren't enough.
 
 | Aspect | Ralph | Pilot |
 |--------|-------|-------|
+| Scope | fully **planned** spec → work → reviews (never plans) | ready spec → plan → reviews → work → draft PR |
 | Loop owner | External `ralph.sh` | Host `/loop` / `/goal` |
 | Session | Fresh per iteration | In-session ticks |
 | Proof-of-work | Receipts under `.flow/review-receipts/` | `PILOT_VERDICT` lines echoed to the transcript |
@@ -193,6 +194,8 @@ Driver recipes:
 - Claude Code `/goal` v2.1.139+ (`/goal` validators are transcript-blind, so phrase the stop condition against the verdict grammar): `/goal keep running /flow-next:pilot until it prints PILOT_VERDICT=NO_WORK, or stop after 20 turns`
 - Codex `/goal`: opt-in `[features] goals = true`, CLI >= 0.128.0. No `$skill-in-goal` syntax — write a plain-text objective that names pilot behavior and `PILOT_VERDICT=<ADVANCED|NO_WORK|BLOCKED|NEEDS_HUMAN>`.
 - Ship loop (after the build loop's draft PRs are open — babysitting waits on external CI/reviewer events, so use a cadence): `/loop 30m /flow-next:land`
+
+**The full pipeline** runs pilot and land **concurrently** — pilot builds spec N while land babysits spec N−1's PR. Same-session (two `/loop` jobs, ticks serialize) works for small backlogs; the real assembly line is **two instances** (Claude Code / Codex), each in **its own clone or git worktree** — both loops mutate the working tree (pilot checks out spec branches, land checks out PR branches for CI fixes), so two loops sharing one checkout would trip each other's dirty-tree guards. GitHub is the shared state: land pushes the spec close after merging, pilot pulls the base branch before planning, and the strike ledgers are per-clone by design. The loops never contend: land touches only specs with all tasks done (in-flight specs stay pilot's), and pilot skips specs that already have an open PR.
 
 The `rp` review backend runs headlessly via rp-cli as long as the Repo Prompt app is running on the same Mac (cold start: `open -ga "Repo Prompt"` — MCP responds within seconds; a stopped app fails fast, never hangs). On machines without the app (remote/CI), use `--review=codex`, `--review=copilot`, or `--review=none`.
 

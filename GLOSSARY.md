@@ -58,7 +58,7 @@ A structured PR body synthesizing nine flow-next state streams (spec with R-IDs,
 
 ## Ralph
 
-The flow-next autonomous overnight loop. External shell loop drives fresh Claude / Codex sessions per task with cross-model review gates and receipt-based proof-of-work. Iterates plan-review -> work -> impl-review -> spec-completion-review until the spec ships or the iteration cap is hit. Differentiator from `ralph-wiggum`-style open-loop autonomous agents. Contrast `/flow-next:pilot`: the in-session, host-driven single-tick conductor — Ralph owns the loop in a shell script; pilot hands the loop to the host's `/loop` / `/goal` primitives.
+The flow-next hardened autonomous harness. External shell loop drives fresh Claude / Codex sessions per task with cross-model review gates, hook-enforced guardrails (ralph-guard / DCG), and receipt-based proof-of-work. Consumes **fully planned** specs only — it iterates plan-review -> work -> impl-review -> spec-completion-review until the spec ships or the iteration cap is hit; it never runs the planning fan-out (planning stays with the human or pilot). Differentiator from `ralph-wiggum`-style open-loop autonomous agents. The default autonomy path is the pilot + land pipeline; reach for Ralph when a run outlasts a session or prose guardrails aren't enough — Ralph owns the loop in a shell script, pilot hands the loop to the host's `/loop` / `/goal` primitives.
 
 ## Pilot
 
