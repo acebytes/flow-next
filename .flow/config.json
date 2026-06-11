@@ -1,4 +1,12 @@
 {
+  "land": {
+    "automatedReviewers": "",
+    "ciFixBudget": 3,
+    "patienceMinutes": 30,
+    "release": true,
+    "reviewSignal": "silence",
+    "reviewTrigger": ""
+  },
   "memory": {
     "enabled": true
   },
@@ -20,6 +28,9 @@
       "capture": "reconcile",
       "completionReview": "reconcile",
       "interview": "reconcile",
+      "land": {
+        "merged": "off"
+      },
       "makePr": "comment",
       "plan": "reconcile",
       "qa": "off",
