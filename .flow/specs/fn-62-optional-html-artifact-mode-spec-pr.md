@@ -35,6 +35,15 @@ flow-next's human touchpoints — spec review, plan review, diff review — are 
 - **Lavish integration (optional, detect-best-available):** `lavish-axi` is never required. When on PATH and the session is interactive, spec/plan artifacts open as a Lavish session — annotations map to edits of the markdown source of truth, then the lens regenerates. Architecture verified: standalone local server, state in `~/.lavish-axi/state.json`, agent side is pull-only (`lavish-axi poll` CLI subprocess, no MCP) — feedback is session-spanning and survives agent death; any later session drains the queue. Autonomous/Ralph contexts never poll (never block on a human).
 - Canonical skill files use Claude-native tool names; the sync script handles the Codex mirror, per repo convention.
 
+**Implementation anchors (from planning research — repo-scout):**
+- Config plumbing is **already generic**: `set_config` (`flowctl.py:1342`) creates intermediate dicts for unknown dot-paths; `deep_merge` (`flowctl.py:1200`) preserves unknown keys. The ONE flowctl edit is an `artifacts` default block in `get_default_config` (`flowctl.py:1124`, follow the `work`/`land` block precedent at `:1145`/`:1164`). Setup detects *unset* keys via `--raw` reads (`flowctl.py:5401`).
+- Setup ceremony hook points: question list at `skills/flow-next-setup/workflow.md:378` (Step 6d, include-only-if-unset pattern), config writes at `:523` (Step 7).
+- PR-lens hook: `make-pr` Phase 1 already calls `flowctl spec export-cognitive-aid` (`workflow.md:285`; impl `flowctl.py:14234`) — the R-ID/diff payload the PR lens consumes; emit the artifact after Phase 1, inject the body link before Phase 4's `gh pr create` (`phases.md:11`). Absolute-URL rule for body links at `workflow.md:420-435`.
+- Spec-lens hooks: capture Phase 5 post-write (`skills/flow-next-capture/workflow.md:590`); plan Step 8 (`skills/flow-next-plan/steps.md:538`).
+- Detect-on-PATH precedent: `skills/flow-next-map/SKILL.md:76` (`command -v` + version warn + install-instructions-never-auto-install); cross-skill reference-file precedent: qa loads drive's files by repo-relative path (`skills/flow-next-qa/SKILL.md:86-87`).
+- Codex mirror: `sync-codex.sh:133-136` copies whole skill dirs; a neutral `plugins/flow-next/references/` location needs a sibling `cp -R` (templates precedent at `:141-145`). Keep the disclosure file tool-name-agnostic so no rewrite pass applies (avoids the R2 ask-block injection class — see memory `r2-ask-block-must-never-anchor-in-2026-06-10`).
+- Generated-dir precedent: `.gitignore` already ignores `.flow/receipts/` + `.flow/tmp/`.
+
 ## Edge Cases & Constraints
 <!-- scope: technical -->
 
@@ -42,12 +51,20 @@ flow-next's human touchpoints — spec review, plan review, diff review — are 
 - **Self-contained or nothing:** zero external requests (fonts included) — the artifact must open identically from disk, in Lavish, in CI archives, and printed. Lavish's portability guarantee depends on this.
 - **Lavish absence/death is invisible:** no lavish on PATH → plain open; server idle-stop → artifact still renders as a static page. Never a hard dependency, never an error path.
 - **Autonomous discipline:** pilot/Ralph runs may generate artifacts but never open polls; at most a receipt note that a session has pending prompts.
-- **Stale-lens risk:** artifacts regenerate at their lifecycle touchpoints; an artifact is never parsed back as state (one-way derivation).
+- **Stale-lens risk:** artifacts regenerate at their lifecycle touchpoints; an artifact is never parsed back as state (one-way derivation). Every artifact carries a staleness stamp in its footer (source spec `updated_at` + git commit at render time) so a reader can tell when the lens lags the markdown.
+- **Artifact paths are fixed and deterministic (planning addition):** `.flow/artifacts/<spec-id>/spec.html` and `.flow/artifacts/<spec-id>/pr.html` — never timestamped. Lavish sessions key on the ABSOLUTE file path; a moving path orphans the annotation queue. Worktree caveat (documented, accepted): different worktrees = different absolute paths = different Lavish sessions.
+- **Link strategy follows ignore-status (planning addition):** artifacts are committed by default (so make-pr blob links resolve on the remote); a project that gitignores `.flow/artifacts/` gets local-open guidance only — the skill checks `git check-ignore` before choosing. Never emit a blob link that 404s.
+- **DAG rendering discipline (planning addition — research flags hand-laid SVG coordinates as the top quality risk):** task graphs render as a layered CSS-grid/flex layout (columns = dependency depth) with edges drawn by a small inlined deterministic JS pass that reads node positions from the DOM at load — never hand-typed SVG coordinates. Above ~20 nodes, collapse to lane/group rendering.
+- **R-ID verification mismatch (PR lens):** when the diff and the spec's R-ID export disagree, the artifact renders the discrepancy visibly (a flagged row) — warn-in-artifact, never block make-pr.
+- **localStorage in artifacts is try-wrapped** progressive enhancement (works on file://, may be blocked elsewhere); artifacts stay fully readable without it.
+- **make-pr artifact side-effect discipline (review addition):** `--dry-run` writes NO artifact (or temp-only, discarded); committed-mode stages ONLY `.flow/artifacts/<spec-id>/pr.html` (never `git add -A`) with a fixed `chore(flow): pr artifact <spec-id>` commit before `gh pr create`; artifact-generation failure is non-fatal (skip the body link, one stderr note); the Ralph stdout contract (`PR_URL=<url>` only) is untouched — all artifact messaging goes to stderr.
+- **Artifact link idempotency (review addition):** the artifact link line in spec markdown is replaced in place on every regeneration — never duplicated across repeated capture/plan runs.
+- **Spec-lens timing in plan (review addition):** the artifact generates AFTER plan's Step 8 refinement loop exits (or regenerates after any Step 8 mutation) so the lens never renders a task graph the user is still editing.
 
 ## Acceptance Criteria
 <!-- scope: both -->
 
-- **R1:** HTML artifact mode is opt-in via setup/config, OFF by default; with the mode off, every skill behaves byte-identically to today (no disclosure file loaded, no artifacts generated). [user]
+- **R1:** HTML artifact mode is opt-in via setup/config, OFF by default. With the mode off, participating skills load no disclosure/reference file, write no artifacts, open no Lavish sessions, and add no behavior-visible output or steps — the only addition is the config-gate check itself in skill prose; the heavy disclosure file incurs zero token cost when off. [user]/[paraphrase]
 - **R2:** When active, participating skills load a progressively disclosed shared reference file carrying the generation rules and an explicit anti-slop design system (own typography/palette; no CDN fonts; no purple-gradient defaults). [user]/[paraphrase]
 - **R3:** Markdown and tracker-sync remain the sole source of truth; every HTML output is an additional regenerable artifact, never parsed back as state. [user]
 - **R4:** Spec artifact uses ONE generation pathway with state-dependent rendering: spec-only before tasks exist; spec+plan layer (task DAG, R-ID coverage matrix) once tasks exist. [user]/[paraphrase]
@@ -87,8 +104,48 @@ Make spec review, plan review, and diff review as efficient and DX-friendly as p
 ### Implementation Tradeoffs
 **Lavish: detect, don't wrap** [user: "lavish is a go as an optional dep"] — its portable-artifacts guarantee means plain self-contained HTML gets the annotate loop for free when present; wrapping would add a Node dependency to the zero-dep base for no gain. Verified pull-only architecture (CLI long-poll, global state file, no MCP) keeps coupling at zero and makes feedback session-spanning. **One artifact pathway, not two** [user] — spec-vs-plan is a rendering question (what state exists), not a product question; avoids a config axis. **Annotate loop scoped to spec/plan** [user: "agentic editing of a PR doesnt make sense"] — a PR artifact derives from an immutable diff; GitHub already owns review comments; duplicating that surface creates a sync problem.
 
+**Planning decisions (added at /flow-next:plan):**
+- **No new slash command.** Auto-regen rides the existing lifecycle skills (capture, plan, make-pr); ad-hoc regeneration (hand edits, post-interview) is conversational — the host agent regenerates on request using the disclosure file. Keeps the skill surface flat per repo rule.
+- **Interview integration is OUT of v1** — capture/plan cover the state-change touchpoints; conversational regen covers the interview flow more cleanly than wiring the lens into a fourth skill.
+- **Artifacts committed by default** (setup offers gitignore); the commit-default is what makes make-pr blob links work for remote reviewers.
+- **`planSync.crossEpic` alias removal rides the 2.0.0 release task** as its own breaking-change CHANGELOG line + regression-test update — a documented 1.x deprecation promise (`flowctl.py:5114-5130`), kept visible, not folded silently into the bump.
+- **No deterministic Python renderer** — generation is the host agent reading the disclosure file (agentic-vs-deterministic rule); flowctl's only contribution is the config default block.
+- **Release task runs LAST (review fix):** the 2.0.0 release (fn-62.6) depends on the flow-next.dev tasks (.7, .8) because the release procedure requires the docs-site changelog + version bump before the tag — task order is .5 → .7 → .8 → .6.
+
+## Quick commands
+
+```bash
+# Activation (after fn-62.1):
+.flow/bin/flowctl config get artifacts.html.enabled --json     # default: false
+.flow/bin/flowctl config set artifacts.html.enabled true
+
+# Smoke: with the mode ON, /flow-next:plan <spec> should emit
+#   .flow/artifacts/<spec-id>/spec.html  (self-contained; zero external requests)
+grep -c 'http' .flow/artifacts/<spec-id>/spec.html   # only repo/tracker links, no asset URLs
+
+# Lavish (optional, when installed):
+command -v lavish-axi && lavish-axi .flow/artifacts/<spec-id>/spec.html
+```
+
+## Early proof point
+
+Task fn-62.2 (the disclosure reference file) validated through fn-62.3's first real regeneration is the core bet: a fresh agent session reading ONLY the disclosure file must reproduce the smoke-test house style (instrument-panel design, layered DAG, source-tag chips, staleness stamp, zero external requests) for fn-62 itself — matching the hand-built artifacts in ~/Documents/flow-next-artifact-smoke/ in quality without having seen them. If the output drifts sloppy or inconsistent, fix the reference file's rules/examples/checklist BEFORE building the PR lens (fn-62.4) and docs (fn-62.5+).
+
 ## Requirement coverage
 
-| Req | Task(s) |
-|-----|---------|
-| R1–R14 | TBD — populate via /flow-next:plan |
+| Req | Description | Task(s) | Gap justification |
+|-----|-------------|---------|-------------------|
+| R1  | Opt-in config, OFF default, no observable change when off (no reference load / artifacts / sessions / output) | fn-62.1 | — |
+| R2  | Progressively disclosed reference file + anti-slop design system | fn-62.2 | — |
+| R3  | Markdown/tracker-sync sole source of truth; artifacts regenerable, never parsed back | fn-62.2 (contract), fn-62.3 (enforced at touchpoints) | — |
+| R4  | One spec-artifact pathway, state-dependent rendering | fn-62.3 | — |
+| R5  | PR artifact diff-derived + R-ID-verified, read-only | fn-62.4 | — |
+| R6  | Self-contained single-file HTML, zero external requests, print-friendly | fn-62.2 | — |
+| R7  | Lavish optional dep: detect-on-PATH, annotate→markdown-edit→regenerate loop | fn-62.2 (detection block), fn-62.3 (session open + poll) | — |
+| R8  | PR artifact never in annotate loop; autonomous never polls | fn-62.3, fn-62.4 | — |
+| R9  | Setup ceremony documents/offers lavish-axi on HTML opt-in | fn-62.1 | — |
+| R10 | Spec + PR markdown link artifacts; GitHub limitation documented | fn-62.3 (spec links), fn-62.4 (PR links), fn-62.5 (docs) | — |
+| R11 | Dedicated regenerable `.flow/artifacts/` location, commit-or-gitignore | fn-62.1 | — |
+| R12 | flow-next.dev mainline surfacing (landing, sections, visual-aids page, both navbars, changelog) | fn-62.7 | — |
+| R13 | flow-next.dev strategy/pipeline pass (pipeline page, autonomy content, Introduction) | fn-62.8 | — |
+| R14 | 2.0.0 release: repo docs, Codex mirror regen, version lockstep, CHANGELOG | fn-62.5 (repo docs), fn-62.6 (release) | — |

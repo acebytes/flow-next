@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-06-11T22:47:52.776144Z",
+  "depends_on": [
+    "fn-62-optional-html-artifact-mode-spec-pr.1"
+  ],
+  "id": "fn-62-optional-html-artifact-mode-spec-pr.2",
+  "priority": null,
+  "spec": "fn-62-optional-html-artifact-mode-spec-pr",
+  "spec_path": ".flow/tasks/fn-62-optional-html-artifact-mode-spec-pr.2.md",
+  "status": "todo",
+  "title": "Shared HTML-artifacts disclosure reference (design system + generation rules) + Codex mirror wiring",
+  "updated_at": "2026-06-11T23:00:29.327145Z"
+}
