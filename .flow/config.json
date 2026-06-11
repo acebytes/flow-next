@@ -36,7 +36,7 @@
       "teamId": "7c086b79-e7fc-4eee-8d2d-b2dd60eee166"
     },
     "provenance": "discovery ceremony 2026-06-03; confirmed by Gordon (@gmickel); signals: Linear MCP present; team Flow Next (FLOW) / project Development",
-    "readyState": null,
+    "readyState": "Todo",
     "staleAfterHours": 24,
     "type": "linear",
     "version": 1
