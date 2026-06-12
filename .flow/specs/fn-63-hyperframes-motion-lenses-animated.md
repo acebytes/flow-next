@@ -9,8 +9,6 @@
 
 ## Goal & Context
 
-STUB — not ready; refine via /flow-next:interview before blessing.
-
 Use HyperFrames to add beautiful, informative, helpful motion to **flow-next.dev** — authored video/animation assets that explain the product better than static images, rendered deterministically from compositions living in the site repo. Candidate surfaces (validate via smoke test before committing scope):
 1. **Landing hero** — short, muted, looping pipeline-in-motion clip (intent → spec → task graph materializes → re-anchored workers → reviewed PR → ship). [paraphrase]
 2. **strategy/pipeline page** — the two static mermaid diagrams become one authored, captioned walkthrough animation of the canonical pipeline. [inferred]
@@ -37,4 +35,17 @@ Use HyperFrames to add beautiful, informative, helpful motion to **flow-next.dev
 
 ## Acceptance Criteria
 
-- **R1:** STUB — to be defined at interview/planning. flow-next.dev gains deterministic HyperFrames-authored motion at a small number of high-leverage surfaces (landing hero, pipeline page; candidates: visual-aids clips, release short), with reduced-motion fallbacks and explicit size budgets; the flow-next plugin itself is unchanged. [user]/[paraphrase]
+- [x] **R1:** (shipped without formal planning — built directly at user direction, 2026-06-12) flow-next.dev gains deterministic HyperFrames-authored motion at a small number of high-leverage surfaces (landing hero, pipeline page; candidates: visual-aids clips, release short), with reduced-motion fallbacks and explicit size budgets; the flow-next plugin itself is unchanged. [user]/[paraphrase]
+
+## Shipped (2026-06-12 — closed against delivered work)
+
+Built conversationally at user direction ("i just want you to make some cool videos that improve our site") rather than through interview/plan — the spec closes against the delivered outcome:
+
+- **Landing hero loop — SHIPPED.** 64.5s seamless loop, 11 beats covering every stage (intent → spec w/ provenance chips → tracker sync → plan + plan-review → re-anchored workers → adversarial review + receipts → render lenses → PR-as-cognitive-aid → pilot/land/ralph autonomy → ship → close). Two user-driven iterations: v2 (12s→55s, "too fast / not detailed enough"), v2.1 (≥1.5s settled hold before every transition; close holds 3.25s). Live on flow-next.dev.
+- **Pipeline page walkthrough — SHIPPED.** 30s captioned explainer (8 beats incl. the pilot/land orbit visualization) embedded above the mermaid on /strategy/pipeline/.
+- **Artifact clips for visual-aids pages — NOT shipped.** Static dogfood screenshots (fn-62) already serve those pages; revisit only if demand appears.
+- **Release/social short — NOT shipped.** Deferred; the composition patterns now exist to make one cheaply.
+
+**Open questions → answers-by-doing:** surfaces v1 = hero + pipeline page · assets = rendered MP4s committed to site `public/videos/` (hero 4.9MB, walkthrough 3.0MB), compositions + manifests + lockfiles in site `motion/` (raw renders gitignored; reproducible via `npx hyperframes render`) · stack = GSAP timelines via HyperFrames (deterministic, seekable) · embeds = autoplay/muted/loop hero band + controls-gated docs video, both with `prefers-reduced-motion` poster fallbacks · quality gates = hyperframes lint/validate (WCAG AA)/inspect/animation-map + loop-endpoint PSNR.
+
+**Evidence (flow-next.dev repo):** 314e7e5 (videos + embeds + band), 3bf4977 (hero v2), 7f4ed44 (hero v2.1 settle holds), a1d7ca2 + c285dc4 (reproducibility housekeeping). Design contract: site `motion/design.md` (instrument-panel house style shared with the fn-62 render lenses).
