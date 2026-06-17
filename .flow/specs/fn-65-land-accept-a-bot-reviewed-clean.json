@@ -1,11 +1,16 @@
 {
   "branch_name": "fn-65-land-accept-a-bot-reviewed-clean",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
   "created_at": "2026-06-17T07:28:03.220063Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
   "depends_on_epics": [],
   "id": "fn-65-land-accept-a-bot-reviewed-clean",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-06-17T07:58:32.835347Z",
   "spec_path": ".flow/specs/fn-65-land-accept-a-bot-reviewed-clean.md",
   "status": "open",
   "title": "land: accept a bot 'reviewed-clean' comment as the silence signal (not just formal reviews)",
@@ -20,5 +25,5 @@
     "mergeBaseTracker": null,
     "url": null
   },
-  "updated_at": "2026-06-17T07:28:48.801487Z"
+  "updated_at": "2026-06-17T07:58:32.835521Z"
 }
