@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # Bump versions in marketplace and/or plugin manifests
-# Usage: ./scripts/bump.sh <patch|minor|major> [marketplace|flow|all]
+# Usage: ./scripts/bump.sh <patch|minor|major> [marketplace|flow-next|all]
 
 BUMP_TYPE="${1:-}"
 TARGET="${2:-all}"
 
 MARKETPLACE=".claude-plugin/marketplace.json"
-PLUGIN_FLOW="plugins/flow/.claude-plugin/plugin.json"
+CODEX_MARKETPLACE=".agents/plugins/marketplace.json"
 PLUGIN_FLOW_NEXT="plugins/flow-next/.claude-plugin/plugin.json"
 
 bump_semver() {
@@ -26,9 +26,8 @@ bump_semver() {
 }
 
 if [[ -z "$BUMP_TYPE" ]] || [[ ! "$BUMP_TYPE" =~ ^(patch|minor|major)$ ]]; then
-  echo "Usage: $0 <patch|minor|major> [marketplace|flow|flow-next|all]"
+  echo "Usage: $0 <patch|minor|major> [marketplace|flow-next|all]"
   echo "  marketplace - bump marketplace version only"
-  echo "  flow        - bump flow plugin version"
   echo "  flow-next   - bump flow-next plugin version"
   echo "  all         - bump all versions (default)"
   exit 1
@@ -39,36 +38,6 @@ if [[ "$TARGET" == "marketplace" || "$TARGET" == "all" ]]; then
   NEW=$(bump_semver "$OLD" "$BUMP_TYPE")
   jq --arg v "$NEW" '.metadata.version = $v' "$MARKETPLACE" > tmp.json && mv tmp.json "$MARKETPLACE"
   echo "marketplace: $OLD -> $NEW"
-fi
-
-if [[ "$TARGET" == "flow" || "$TARGET" == "all" ]]; then
-  OLD=$(jq -r '.version' "$PLUGIN_FLOW")
-  NEW=$(bump_semver "$OLD" "$BUMP_TYPE")
-
-  # Update plugin.json
-  jq --arg v "$NEW" '.version = $v' "$PLUGIN_FLOW" > tmp.json && mv tmp.json "$PLUGIN_FLOW"
-
-  # Update .codex-plugin/plugin.json if it exists
-  CODEX_PLUGIN="plugins/flow/.codex-plugin/plugin.json"
-  if [[ -f "$CODEX_PLUGIN" ]]; then
-    jq --arg v "$NEW" '.version = $v' "$CODEX_PLUGIN" > tmp.json && mv tmp.json "$CODEX_PLUGIN"
-    echo "flow (codex): $OLD -> $NEW"
-  fi
-
-  # Update marketplace.json flow plugin version
-  jq --arg v "$NEW" '(.plugins[] | select(.name == "flow")).version = $v' "$MARKETPLACE" > tmp.json && mv tmp.json "$MARKETPLACE"
-
-  # Update version badges in READMEs
-  sed -i '' "s/Flow-v[0-9]*\.[0-9]*\.[0-9]*/Flow-v$NEW/" README.md
-  sed -i '' "s/Version-[0-9]*\.[0-9]*\.[0-9]*/Version-$NEW/" plugins/flow/README.md
-
-  echo "flow: $OLD -> $NEW"
-
-  # Sync codex/ if plugin has codex directory
-  if [[ -d "plugins/flow/codex" ]]; then
-    echo "syncing codex/ for flow..."
-    bash scripts/sync-codex.sh
-  fi
 fi
 
 if [[ "$TARGET" == "flow-next" || "$TARGET" == "all" ]]; then
@@ -85,11 +54,25 @@ if [[ "$TARGET" == "flow-next" || "$TARGET" == "all" ]]; then
     echo "flow-next (codex): $OLD -> $NEW"
   fi
 
+  # Update .cursor-plugin/plugin.json if it exists (Cursor local-install manifest)
+  CURSOR_PLUGIN="plugins/flow-next/.cursor-plugin/plugin.json"
+  if [[ -f "$CURSOR_PLUGIN" ]]; then
+    jq --arg v "$NEW" '.version = $v' "$CURSOR_PLUGIN" > tmp.json && mv tmp.json "$CURSOR_PLUGIN"
+    echo "flow-next (cursor): $OLD -> $NEW"
+  fi
+
   # Update marketplace.json flow-next plugin version
   jq --arg v "$NEW" '(.plugins[] | select(.name == "flow-next")).version = $v' "$MARKETPLACE" > tmp.json && mv tmp.json "$MARKETPLACE"
 
   # Update marketplace metadata version to match (required for auto-updates)
   jq --arg v "$NEW" '.metadata.version = $v' "$MARKETPLACE" > tmp.json && mv tmp.json "$MARKETPLACE"
+
+  # Update the Codex marketplace (.agents/plugins/marketplace.json) flow-next
+  # plugin version. It has no metadata.version block — just the plugin entry.
+  if [[ -f "$CODEX_MARKETPLACE" ]]; then
+    jq --arg v "$NEW" '(.plugins[] | select(.name == "flow-next")).version = $v' "$CODEX_MARKETPLACE" > tmp.json && mv tmp.json "$CODEX_MARKETPLACE"
+    echo "flow-next (codex marketplace): $OLD -> $NEW"
+  fi
 
   # Update version badges in READMEs
   sed -i '' "s/Flow--next-v[0-9]*\.[0-9]*\.[0-9]*/Flow--next-v$NEW/" README.md

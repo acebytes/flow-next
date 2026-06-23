@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-06-17T07:38:18.160274Z",
+  "depends_on": [
+    "fn-65-land-accept-a-bot-reviewed-clean.1"
+  ],
+  "id": "fn-65-land-accept-a-bot-reviewed-clean.2",
+  "priority": null,
+  "spec": "fn-65-land-accept-a-bot-reviewed-clean",
+  "spec_path": ".flow/tasks/fn-65-land-accept-a-bot-reviewed-clean.2.md",
+  "status": "todo",
+  "title": "Docs (flowctl.md + flow-next.dev land.mdx) + CHANGELOG + version bump + docs-site changelog",
+  "updated_at": "2026-06-17T07:56:43.122296Z"
+}

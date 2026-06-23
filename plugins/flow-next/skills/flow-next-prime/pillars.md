@@ -85,11 +85,14 @@ Clear docs that tell agents how the project works.
 | DC5 | Test commands documented | How to run tests documented |
 | DC6 | Architecture documented | ARCHITECTURE.md, ADRs, or docs/ with structure |
 | DC7 | DESIGN.md exists (frontend projects) | DESIGN.md with color + typography + component sections (informational — not scored for backend-only projects) |
+| DC8 | Glossary populated | `"$FLOWCTL" glossary list --json` reports `total_terms > 0` (informational — not scored; husk-aware: gate on the term count, never `[[ -f GLOSSARY.md ]]` — `glossary remove` leaves an H1 husk; see `workflow.md` glossary signal block) |
 
 ### Scoring
 - ✅ 80%+: Agents can self-serve
 - ⚠️ 40-79%: Basic docs present
 - ❌ <40%: Agents must guess
+
+DC8 is **informational** — excluded from the Pillar 4 score and the agent-readiness baseline. Unlike DC7/DE7 (suggestion-only), a negative DC8 routes to the dedicated **Phase 5.5 glossary bootstrap** (read-back gated) — never to a Phase 5 template fix. A populated glossary is report-only: prime states term coverage and never rewrites or re-proposes existing terms (staleness/alias pruning belongs to `/flow-next:audit`).
 
 ---
 
@@ -107,11 +110,14 @@ Reproducible environment setup.
 | DE4 | Setup script or docs | setup.sh or clear setup instructions |
 | DE5 | Devcontainer available | .devcontainer/ config present |
 | DE6 | Docker available | Dockerfile or docker-compose.yml |
+| DE7 | Codebase feature map present | `[[ -d .clawpatch ]]` + `"$FLOWCTL" repo-map list --count > 0` (informational — not scored; surfaces `/flow-next:map` suggestion in Top Recommendations when missing; `$FLOWCTL` resolved via the bundled Droid+Claude fallback — see `workflow.md` DE7 detection block) |
 
 ### Scoring
 - ✅ 80%+: One-command setup possible
 - ⚠️ 40-79%: Setup mostly documented
 - ❌ <40%: Setup requires tribal knowledge
+
+DE7 is **informational** — like DC7 and DC8, it is excluded from the Pillar 5 score and the agent-readiness baseline. Scored criteria total **48**; including the informational DE7 and DC8 rows the table totals **50**.
 
 ---
 
@@ -148,7 +154,7 @@ Security posture and access controls.
 
 | ID | Criterion | Pass Condition |
 |----|-----------|----------------|
-| SE1 | Branch protection | Main/master branch protected (via `gh api`) |
+| SE1 | Branch protection | Main/master branch protected via classic branch protection OR rulesets (repo / org / enterprise level — any layer counts) |
 | SE2 | Secret scanning | GitHub secret scanning enabled |
 | SE3 | CODEOWNERS | .github/CODEOWNERS file exists |
 | SE4 | Dependency updates | Dependabot or Renovate configured |

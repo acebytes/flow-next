@@ -2,7 +2,7 @@
 name: flow-next-audit
 description: Audit `.flow/memory/` entries against the current codebase and decide Keep / Update / Consolidate / Replace / Delete per entry. Triggers on /flow-next:audit, "audit memory", "review memory", "refresh learnings", "sweep stale memory", "consolidate overlapping memory entries". Optional `mode:autofix` token in arguments runs without questions and marks ambiguous as stale. Optional scope hint after the mode token (concept, category, module, or path) narrows what gets audited.
 user-invocable: false
-allowed-tools: request_user_input, Read, Bash, Grep, Glob, Write, Edit, Task
+allowed-tools: Read, Bash, Grep, Glob, Write, Edit, Task
 ---
 
 # /flow-next:audit — agent-native memory staleness review
@@ -13,18 +13,20 @@ This skill IS the audit. The host agent (Claude Code / Codex / Droid) walks `.fl
 
 Decision entries (`.flow/memory/knowledge/decisions/`) and glossary terms (`GLOSSARY.md` files at the repo root and on the ancestor chain) are walked alongside the rest of memory. Decisions get a calibrated judging question — "does the constraint that motivated this choice still hold?" — and Replace becomes a two-step supersession (write successor, mark old `decision_status: superseded`, never `git rm`). Glossary terms are scanned for code usage; zero-hit terms get a `<!-- stale: ... -->` HTML comment via Edit tool (no `flowctl glossary mark-stale` exists), `_Avoid_` aliases appearing in code surface as alias-creep findings.
 
-There is no Python audit-engine, no codex/copilot subprocess dispatch, no deterministic scorer. The host agent is already an LLM and does the work directly. flowctl provides only thin persistence plumbing (`memory mark-stale`, `memory mark-fresh`, `memory search --status`) — landed by Task 2 of this epic.
+There is no Python audit-engine, no codex/copilot subprocess dispatch, no deterministic scorer. The host agent is already an LLM and does the work directly. flowctl provides only thin persistence plumbing (`memory mark-stale`, `memory mark-fresh`, `memory search --status`) — landed by Task 2 of this spec.
 
 **Read [workflow.md](workflow.md) for the full phase-by-phase execution. Read [phases.md](phases.md) for the 5-outcomes lookup with memory-schema-specific calibration.**
 
-**CRITICAL: flowctl is BUNDLED — NOT installed globally.** `which flowctl` will fail (expected). Always use:
+## Preamble
+
+**CRITICAL: flowctl is BUNDLED — NOT installed globally.** `which flowctl` will fail (expected). Define once; subsequent blocks (here and in `workflow.md`) use `$FLOWCTL`:
 
 ```bash
-FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$HOME/.codex}}/scripts/flowctl"
+FLOWCTL="$HOME/.codex/scripts/flowctl"
 [ -x "$FLOWCTL" ] || FLOWCTL=".flow/bin/flowctl"
 ```
 
-**Inline skill (no `context: fork`)** — `request_user_input` must stay reachable across phases. Subagents can't call blocking question tools (Claude Code issues #12890, #34592). Phase 3 (Ask) and Phase 6 (Discoverability check) both require user choice in interactive mode.
+**Inline skill (no `context: fork`)** — `plain-text numbered prompt` must stay reachable across phases. Subagents can't call plain-text numbered prompts (Claude Code issues #12890, #34592). Phase 3 (Ask) and Phase 6 (Discoverability check) both require user choice in interactive mode.
 
 ## Mode Detection
 
@@ -44,12 +46,12 @@ fi
 
 | Mode | When | Behavior |
 |------|------|----------|
-| **Interactive** (default) | User is at the terminal | Ask decisions on ambiguous cases via blocking-question tool; confirm batched actions; run discoverability check with consent |
+| **Interactive** (default) | User is at the terminal | Ask decisions on ambiguous cases via plain-text numbered prompt; confirm batched actions; run discoverability check with consent |
 | **Autofix** (`mode:autofix` in arguments) | Ralph or batch usage | No user questions. Apply Keep/Update/Consolidate/auto-Delete/Replace-with-sufficient-evidence directly. Mark ambiguous as stale. Print the full report. Discoverability surfaces as a recommendation, not an edit |
 
 ### Autofix mode rules
 
-- **No user questions.** Never call the blocking-question tool.
+- **No user questions.** Never call the plain-text numbered prompt.
 - **Process all entries in scope.** No scope-narrowing question. If no scope hint was provided, process every categorized entry.
 - **Attempt all safe actions.** Keep (no-op), Update (write tool), Consolidate (merge + `git rm` subsumed), auto-Delete (only when code AND problem domain both gone), Replace (only with sufficient evidence to write a trustworthy successor).
 - **Mark ambiguous as stale.** When classification is genuinely ambiguous (Update vs Replace vs Consolidate vs Delete) or Replace evidence is insufficient, run `flowctl memory mark-stale <id> --reason "..."` instead of guessing. Stale-marking writes are atomic and round-trip safe.
@@ -62,7 +64,9 @@ In autofix mode, skip user questions entirely and apply the rules above.
 
 In interactive mode, follow these principles:
 
-- Ask **one question at a time** via `request_user_input`. Fall back to numbered options in plain text only if the tool is unreachable or errors. Never silently skip the question.
+**Ask the user via plain text.** Render the options below as a numbered list `1.` … `N.`, followed by a final option `N+1. Other — type your own answer`. Print the question, then the numbered list, then **stop and wait for the user's next message before continuing**. Parse the reply as: a bare number `1`–`N+1` → that option; the literal text of an option label → that option; free text after `Other` → custom answer.
+
+- Ask **one question at a time** via `plain-text numbered prompt`. Never silently skip the question.
 - Prefer **multiple choice** when natural options exist.
 - Lead with the **recommended option** and a one-sentence rationale.
 - Do **not** ask the user to make decisions before evidence is gathered — Phase 1 investigates first, Phase 3 asks.
@@ -80,7 +84,7 @@ The goal is automated maintenance with human oversight on judgment calls — not
 - **Inventing flowctl subcommands** beyond what fn-34 task 2 ships (`memory mark-stale`, `memory mark-fresh`, `memory search --status`). fn-38 task 2 ships only `glossary {add,list,read,remove}` — there is no `flowctl glossary mark-stale`; use Edit tool. Use Write tool + git for moves and deletes.
 - **Mass-renaming code from a glossary alias-creep finding.** The audit reports file:line locations and stops there; code rename is the operator's call.
 - **Auto-committing without user awareness in interactive mode.** Phase 5 detects git context and asks. Autofix uses sensible defaults.
-- **Setting `context: fork`** — blocking-question tools must stay reachable.
+- **Setting `context: fork`** — plain-text numbered prompt must stay reachable.
 - **Running parallel replacement subagents.** Investigation subagents can run in parallel for 3+ independent entries; replacement subagents run sequentially to protect orchestrator context.
 
 ## Pre-check: local setup version
@@ -91,7 +95,6 @@ Same pattern as `/flow-next:plan` and `/flow-next:prospect` — non-blocking not
 if [[ -f .flow/meta.json ]]; then
  SETUP_VER=$(jq -r '.setup_version // empty' .flow/meta.json 2>/dev/null)
  PLUGIN_JSON="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$HOME/.codex}}/.codex-plugin/plugin.json"
- [[ -f "$PLUGIN_JSON" ]] || PLUGIN_JSON="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.claude-plugin/plugin.json"
  PLUGIN_VER=$(jq -r '.version' "$PLUGIN_JSON" 2>/dev/null || echo "unknown")
  if [[ -n "$SETUP_VER" && "$PLUGIN_VER" != "unknown" && "$SETUP_VER" != "$PLUGIN_VER" ]]; then
  echo "Plugin updated to v${PLUGIN_VER}. Run /flow-next:setup to refresh local scripts (current: v${SETUP_VER})." >&2

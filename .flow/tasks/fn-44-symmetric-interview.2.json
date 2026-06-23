@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-05-15T19:42:37.013039Z",
+  "depends_on": [],
+  "id": "fn-44-symmetric-interview.2",
+  "priority": null,
+  "spec": "fn-44-symmetric-interview",
+  "spec_path": ".flow/tasks/fn-44-symmetric-interview.2.md",
+  "status": "todo",
+  "title": "Interview --scope flag parsing + pass behavior + command-file flag docs",
+  "updated_at": "2026-05-15T20:02:01.865060Z"
+}

@@ -1,0 +1,18 @@
+{
+  "branch_name": "fn-10",
+  "completion_review_status": "ship",
+  "completion_reviewed_at": "2026-05-21T14:13:11.164587Z",
+  "created_at": "2026-01-13T11:52:28.393444Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [],
+  "id": "fn-10",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-10.md",
+  "status": "done",
+  "title": "TUI multi-tool parser adapters",
+  "updated_at": "2026-05-21T14:13:11.324747Z"
+}

@@ -1,0 +1,18 @@
+{
+  "branch_name": "fn-7",
+  "completion_review_status": "ship",
+  "completion_reviewed_at": "2026-05-21T14:13:10.526511Z",
+  "created_at": "2026-01-12T20:34:13.775225Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [],
+  "id": "fn-7",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-7.md",
+  "status": "done",
+  "title": "TUI: Search overlay",
+  "updated_at": "2026-05-21T14:13:10.687951Z"
+}

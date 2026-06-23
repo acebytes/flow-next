@@ -7,6 +7,7 @@ Execute these phases in order. Each gates on the prior. Stop on user-blocking er
 ```bash
 set -e
 FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/flowctl"
+[ -x "$FLOWCTL" ] || FLOWCTL=".flow/bin/flowctl"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 MEMORY_DIR="$REPO_ROOT/.flow/memory"
 TODAY="$(date -u +%Y-%m-%d)"
@@ -470,7 +471,7 @@ Bundle the easy ones, isolate the hard ones:
 
 ### 3.2 — Question style
 
-Use `AskUserQuestion` (deferred — load via `ToolSearch select:AskUserQuestion` if its schema isn't yet in scope). If the tool is unreachable, fall back to printing a numbered list and reading a typed reply. (sync-codex.sh rewrites `AskUserQuestion` to `request_user_input` for the Codex mirror.)
+Use `AskUserQuestion` (deferred — load via `ToolSearch select:AskUserQuestion` if its schema isn't yet in scope). If the tool is unreachable, fall back to printing a numbered list and reading a typed reply. (sync-codex.sh rewrites this to a plain-text numbered prompt in the Codex mirror.)
 
 Rules:
 

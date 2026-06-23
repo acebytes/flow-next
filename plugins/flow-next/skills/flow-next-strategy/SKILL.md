@@ -13,9 +13,18 @@ The document is short and structured on purpose. Good answers to a handful of sh
 
 **Note: The current year is 2026.** Use this when dating the strategy document.
 
+## Preamble
+
+flowctl is **bundled — NOT installed globally.** `which flowctl` will fail (expected). Define once; subsequent blocks use `$FLOWCTL`:
+
+```bash
+FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/flowctl"
+[ -x "$FLOWCTL" ] || FLOWCTL=".flow/bin/flowctl"
+```
+
 ## Interaction Method
 
-Default to `AskUserQuestion` (call `ToolSearch` with `select:AskUserQuestion` first if its schema isn't loaded). Fall back to numbered options in chat only when the tool is unreachable in the harness or the call errors — never silently skip the question. (sync-codex.sh rewrites `AskUserQuestion` to `request_user_input` in the Codex mirror.)
+Default to `AskUserQuestion` (call `ToolSearch` with `select:AskUserQuestion` first if its schema isn't loaded). Fall back to numbered options in chat only when the tool is unreachable in the harness or the call errors — never silently skip the question. (sync-codex.sh rewrites this to a plain-text numbered prompt in the Codex mirror.)
 
 Ask one question at a time. **Free-form responses for the substantive sections** (Target problem / Our approach / Who it's for / Key metrics / Tracks). **Single-select with lead-with-recommendation only for routing decisions** (which section to revisit, include this optional section, foreign-file resolution).
 
@@ -27,7 +36,7 @@ Interpret any argument as an optional focus: a section name to revisit (`metrics
 
 ## Core Principles
 
-1. **Anchor, not plan.** Strategy is what the product is and why. Features belong in `/flow-next:prospect`; tasks belong in epics and `/flow-next:plan`. Do not let either creep into the doc.
+1. **Anchor, not plan.** Strategy is what the product is and why. Features belong in `/flow-next:prospect`; tasks belong in specs and `/flow-next:plan`. Do not let either creep into the doc.
 2. **Rigor in the questions, not the headings.** The section headers are plain English. The interview questions enforce strategy discipline (`references/interview.md`).
 3. **Short is a feature.** The template is constrained. Adding sections costs more than it looks like. Push back on expansion.
 4. **Durable across runs.** This skill is rerunnable. On a second run it updates in place, preserves what is working, and only challenges sections that look stale or weak.
@@ -41,20 +50,11 @@ Same pattern as `/flow-next:plan` and `/flow-next:audit` — non-blocking notice
 if [[ -f .flow/meta.json ]]; then
   SETUP_VER=$(jq -r '.setup_version // empty' .flow/meta.json 2>/dev/null)
   PLUGIN_JSON="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.claude-plugin/plugin.json"
-  [[ -f "$PLUGIN_JSON" ]] || PLUGIN_JSON="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.factory-plugin/plugin.json"
   PLUGIN_VER=$(jq -r '.version' "$PLUGIN_JSON" 2>/dev/null || echo "unknown")
   if [[ -n "$SETUP_VER" && "$PLUGIN_VER" != "unknown" && "$SETUP_VER" != "$PLUGIN_VER" ]]; then
     echo "Plugin updated to v${PLUGIN_VER}. Run /flow-next:setup to refresh local scripts (current: v${SETUP_VER})." >&2
   fi
 fi
-```
-
-## flowctl path
-
-flowctl is **bundled — NOT installed globally.** `which flowctl` will fail (expected). Always use:
-
-```bash
-FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/flowctl"
 ```
 
 ## Execution Flow
@@ -228,14 +228,14 @@ After a section is updated, return to the routing question — user can revisit 
 
 After writing (first-run or update), surface the file's role to the user in one paragraph:
 
-- If `.flow/epics/` is empty AND `.flow/prospects/` is empty: `Strategy doc written. Next, /flow-next:prospect [optional focus] generates ranked candidate ideas grounded in the strategy you just captured.`
+- If `.flow/specs/` is empty (and any legacy `.flow/epics/` is also empty) AND `.flow/prospects/` is empty: `Strategy doc written. Next, /flow-next:prospect [optional focus] generates ranked candidate ideas grounded in the strategy you just captured.`
 - If `.flow/` is populated: `Strategy doc written. Downstream skills (/flow-next:prospect, /flow-next:plan, /flow-next:interview, /flow-next:capture, /flow-next:sync) will read STRATEGY.md as grounding on next invocation.`
 
 One paragraph max. No follow-up questions.
 
 ## What this skill does not do
 
-- Does not update the issue tracker or reconcile in-flight work. Strategy is the doc; execution lives in epics, tasks, and `/flow-next:plan`.
+- Does not update the issue tracker or reconcile in-flight work. Strategy is the doc; execution lives in specs, tasks, and `/flow-next:plan`.
 - Does not write product requirements or implementation plans — those are `/flow-next:capture` and `/flow-next:plan`.
 - Does not compute metric values. It records *which* metrics matter and where they live, not what they read today.
 - Does not create per-subdirectory STRATEGY.md files. Strategy is repo-wide by Rumelt's definition; cascading strategies re-introduce the "is for everyone, is for no one" problem.

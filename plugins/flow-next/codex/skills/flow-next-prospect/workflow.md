@@ -6,7 +6,7 @@ Execute these phases in order. Each gates on the prior. Stop on user-blocking er
 
 ```bash
 set -e
-FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$HOME/.codex}}/scripts/flowctl"
+FLOWCTL="$HOME/.codex/scripts/flowctl"
 [ -x "$FLOWCTL" ] || FLOWCTL=".flow/bin/flowctl"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 PROSPECTS_DIR="$REPO_ROOT/.flow/prospects"
@@ -152,7 +152,9 @@ If `RESUMABLE_COUNT == 0` (only corrupt artifacts), skip to Phase 1 — nothing 
 
 ### 0.4 — Blocking question
 
-Present the resumable list in a deterministic numbered format and ask the user to choose a path. Use `request_user_input`; fall back to printing the numbered list and reading a typed reply if the tool is unreachable.
+**Ask the user via plain text.** Render the options below as a numbered list `1.` … `N.`, followed by a final option `N+1. Other — type your own answer`. Print the question, then the numbered list, then **stop and wait for the user's next message before continuing**. Parse the reply as: a bare number `1`–`N+1` → that option; the literal text of an option label → that option; free text after `Other` → custom answer.
+
+Present the resumable list in a deterministic numbered format and ask the user to choose a path. Use `plain-text numbered prompt`.
 
 Frozen option strings (R19 anchor — must match exactly across backends):
 
@@ -193,7 +195,7 @@ Classify the hint by surface:
 - Matches one of `top N`, `N ideas`, `raise the bar` → `FOCUS_KIND=volume`. Volume semantics are interpreted in Phase 2 (task 2); record verbatim here.
 - Anything else → `FOCUS_KIND=concept`. Hint flows to Phase 2 prompts as-is.
 
-If `FOCUS_KIND == path` and `[[ ! -e "$REPO_ROOT/$FOCUS_PATH" ]]`, the hint resolves to nothing on disk. Ask via blocking question whether to (a) continue open-ended, (b) re-enter a different hint, or (c) abort. Do not assume open-ended silently — the user typed a path for a reason.
+If `FOCUS_KIND == path` and `[[ ! -e "$REPO_ROOT/$FOCUS_PATH" ]]`, the hint resolves to nothing on disk. Ask via plain-text numbered prompt whether to (a) continue open-ended, (b) re-enter a different hint, or (c) abort. Do not assume open-ended silently — the user typed a path for a reason.
 
 ### 1.2 — Collect signals (graceful degradation per source)
 
@@ -215,23 +217,23 @@ else
 fi
 ```
 
-#### Open epics
+#### Open specs
 
 ```bash
-EPICS_JSON=$("$FLOWCTL" epics --json 2>/dev/null || echo '{"epics":[]}')
-OPEN_EPICS=$(jq '[.epics[] | select(.status == "open")]' <<< "$EPICS_JSON" 2>/dev/null || echo '[]')
-EPICS_COUNT=$(jq 'length' <<< "$OPEN_EPICS" 2>/dev/null || echo 0)
-if [[ "$EPICS_COUNT" -gt 0 ]]; then
- EPICS_BLOCK="open_epics: ${EPICS_COUNT}
-$(jq -r '.[] | " - \(.id): \(.title)"' <<< "$OPEN_EPICS")"
+SPECS_JSON=$("$FLOWCTL" specs --json 2>/dev/null || echo '{"specs":[]}')
+OPEN_SPECS=$(jq '[.specs[] | select(.status == "open")]' <<< "$SPECS_JSON" 2>/dev/null || echo '[]')
+SPECS_COUNT=$(jq 'length' <<< "$OPEN_SPECS" 2>/dev/null || echo 0)
+if [[ "$SPECS_COUNT" -gt 0 ]]; then
+ SPECS_BLOCK="open_specs: ${SPECS_COUNT}
+$(jq -r '.[] | " - \(.id): \(.title)"' <<< "$OPEN_SPECS")"
 else
- EPICS_BLOCK="open_epics: scanned: none (no open epics)"
+ SPECS_BLOCK="open_specs: scanned: none (no open specs)"
 fi
 ```
 
-`flowctl epics --json` returns all epics; filter by `status == "open"` via jq. Status values used by flowctl are `open` and `done` (sometimes `closed`); the filter can be widened to `status != "done"` if `closed` shows up.
+`flowctl specs --json` returns all specs; filter by `status == "open"` via jq. Status values used by flowctl are `open` and `done` (sometimes `closed`); the filter can be widened to `status != "done"` if `closed` shows up.
 
-The Phase 2 prompt uses this list as anti-duplication grounding — candidates that overlap an open epic must surface in Phase 3 critique under `duplicates-open-epic`.
+The Phase 2 prompt uses this list as anti-duplication grounding — candidates that overlap an open spec must surface in Phase 3 critique under `duplicates-open-epic` (frozen taxonomy slug, kept stable for artifact round-trip; the prose semantics now read "duplicates-open-spec").
 
 #### CHANGELOG (top 50 lines)
 
@@ -342,7 +344,7 @@ The `target_problem`, `approach`, and `tracks` strings are emitted **verbatim** 
 
 ### 1.3 — Emit snapshot
 
-Concatenate the blocks under a single `## Grounding snapshot` heading. Order is fixed (git log → open epics → changelog → memory → memory audit → strategy) so the snapshot is comparable across runs. Cap each block by line-count so total output stays in the 30-50 line target window.
+Concatenate the blocks under a single `## Grounding snapshot` heading. Order is fixed (git log → open specs → changelog → memory → memory audit → strategy) so the snapshot is comparable across runs. Cap each block by line-count so total output stays in the 30-50 line target window.
 
 The snapshot is the input to Phase 2's generation prompt (task 2). For this task, the snapshot is printed to stdout for manual inspection — Phase 2's prompt scaffolding lands later.
 
@@ -356,7 +358,7 @@ $( [[ -n "$FOCUS_PATH" ]] && echo "focus_path: $FOCUS_PATH" )
 
 $GIT_BLOCK
 
-$EPICS_BLOCK
+$SPECS_BLOCK
 
 $CHANGELOG_BLOCK
 
@@ -370,7 +372,7 @@ EOF
 
 ### 1.4 — Manual smoke (acceptance R1, R17)
 
-In the flow-next plugin repo: `prospect DX` should produce a readable snapshot listing recently-modified files, open epics (e.g. fn-33 itself), CHANGELOG entries from the last few releases, memory hits if memory is initialised, and `scanned: none (...)` lines for any absent source. The snapshot must fit in roughly 30-50 lines of output and must not contain raw file bodies.
+In the flow-next plugin repo: `prospect DX` should produce a readable snapshot listing recently-modified files, open specs (e.g. fn-33 itself), CHANGELOG entries from the last few releases, memory hits if memory is initialised, and `scanned: none (...)` lines for any absent source. The snapshot must fit in roughly 30-50 lines of output and must not contain raw file bodies.
 
 If grounding can't produce a useful snapshot from a real repo (too noisy / too sparse / too slow), this is the early-proof-point gate — re-evaluate scanning strategy before building Phases 2-5.
 
@@ -435,7 +437,7 @@ focus_kind: [FOCUS_KIND]
 
 ## Grounding snapshot
 
-[Phase 1 snapshot verbatim — git log, open epics, CHANGELOG, memory, audit]
+[Phase 1 snapshot verbatim — git log, open specs, CHANGELOG, memory, audit]
 
 ## Personas
 
@@ -500,7 +502,7 @@ If PyYAML is unavailable on the host, fall back to the stdlib parser pattern fro
 
 Hand the validated list to Phase 3 as `CANDIDATES_YAML` (canonical form: re-serialize from the parsed object so downstream prompts get a clean shape).
 
-If fewer than `floor(GENERATION_TARGET_MIN * 0.7)` valid candidates survive validation, surface a blocking question:
+If fewer than `floor(GENERATION_TARGET_MIN * 0.7)` valid candidates survive validation, surface a plain-text numbered prompt:
 
 ```
 Phase 2 produced only K valid candidates (target was M-N). Options:
@@ -524,7 +526,7 @@ Inputs: `CANDIDATES_YAML` (Phase 2 §2.4) + the Phase 1 grounding snapshot. **Ex
 Rejection taxonomy (R3 anchor — frozen string list):
 
 ```
-duplicates-open-epic — material overlap with an open epic in the grounding snapshot
+duplicates-open-epic — material overlap with an open spec in the grounding snapshot (slug kept stable for artifact round-trip; semantics now read "duplicates-open-spec")
 out-of-scope — outside what this codebase / the focus area should tackle
 out-of-scope-vs-strategy — contradicts an active track in the strategy snapshot (advisory only — user can override at promote time)
 insufficient-signal — speculative without evidence in grounding snapshot
@@ -554,7 +556,7 @@ Evaluate each candidate against the grounding snapshot. Reject aggressively. "Co
 
 For each candidate, emit a verdict: `keep` or `drop`. If `drop`, the `taxonomy` field must be one of:
 
-- `duplicates-open-epic` — same direction as a listed open epic
+- `duplicates-open-epic` — same direction as a listed open spec (slug kept stable for artifact round-trip)
 - `out-of-scope` — not aligned with this codebase or the focus area
 - `out-of-scope-vs-strategy` — contradicts an active track in the strategy snapshot; cite the violated track name verbatim in `reason` (advisory — user can override)
 - `insufficient-signal` — no grounding evidence supports this being worth doing now
@@ -591,7 +593,7 @@ Pair each critique entry with its candidate by `index`. Compute:
 rejection_rate = drops / total
 ```
 
-If `rejection_rate < REJECTION_FLOOR`, surface a **blocking question** with the frozen options:
+If `rejection_rate < REJECTION_FLOOR`, surface a **plain-text numbered prompt** with the frozen options:
 
 ```
 Critique rejected only X% (below the ≥Y% floor). Options:
@@ -600,7 +602,7 @@ Critique rejected only X% (below the ≥Y% floor). Options:
  ship-anyway — same as loosen-floor; preserved for clarity in transcripts
 ```
 
-Frozen string format (R12 anchor — must match across backends): `regenerate | loosen-floor | ship-anyway`. Use `request_user_input`; fall back to numbered-options when the tool is unreachable. Validate the choice; reject anything outside the three options.
+Frozen string format (R12 anchor — must match across backends): `regenerate | loosen-floor | ship-anyway`. Use `plain-text numbered prompt`. Validate the choice; reject anything outside the three options.
 
 - `regenerate` → loop back to Phase 2 §2.3 with a fresh prompt invocation. Cap at **1 regeneration**; a second floor violation auto-routes to `loosen-floor` with a printed warning (avoids infinite loops on a model that genuinely can't reject).
 - `loosen-floor` / `ship-anyway` → continue to Phase 4. Record `floor_violation: true` in the eventual artifact frontmatter.
@@ -612,7 +614,7 @@ Materialize:
 - `SURVIVORS` — list of `{candidate, critique}` pairs where `critique.verdict == "keep"`. Order preserved from Phase 2.
 - `DROPS` — list of `{candidate, critique}` pairs where `critique.verdict == "drop"`. Used by Phase 5 (task 3) to populate the `## Rejected` section.
 
-If `len(SURVIVORS) == 0`, surface a blocking question:
+If `len(SURVIVORS) == 0`, surface a plain-text numbered prompt:
 
 ```
 Critique rejected every candidate. Options:
@@ -842,11 +844,11 @@ Empty buckets render `_(none)_`. Empty `## Rejected` renders `_(none)_`.
 
 ## Phase 6: Handoff prompt (R9, R19)
 
-**Goal:** offer the user a one-keystroke path from "artifact saved" to either an epic (via `flowctl prospect promote`), an interview (via `/flow-next:interview`), or a clean exit. The artifact already exists on disk by the time this phase fires — Ctrl-C here loses nothing.
+**Goal:** offer the user a one-keystroke path from "artifact saved" to either a spec (via `flowctl prospect promote`), an interview (via `/flow-next:interview`), or a clean exit. The artifact already exists on disk by the time this phase fires — Ctrl-C here loses nothing.
 
-### 6.1 — Use the blocking-question tool
+### 6.1 — Use the plain-text numbered prompt
 
-Use `request_user_input`. If the tool is unreachable, print the frozen-string format below and read the user's reply from chat.
+Use `plain-text numbered prompt`.
 
 If the tool is available, use it with these labelled choices (one per survivor + skip + interview):
 
@@ -860,12 +862,12 @@ The tool's free-text `description` field gets the artifact path so the user has 
 
 ### 6.2 — Frozen numbered-options fallback (R19)
 
-When no blocking tool is reachable (or the platform tool errors), print this **exact** string format. Do not paraphrase, re-order, or add commentary — the smoke test in task 6 grep-checks this format:
+When plain text is the prompt mechanism (or the platform tool errors), print this **exact** string format. Do not paraphrase, re-order, or add commentary — the smoke test in task 6 grep-checks this format:
 
 ```
 Saved: .flow/prospects/<artifact-id>.md
 
-Promote a survivor to an epic?
+Promote a survivor to a spec?
  1) Promote #1: <title>
  2) Promote #2: <title>
  ...
@@ -883,9 +885,9 @@ Normalize the reply (strip whitespace, lowercase). Route by exact match:
 
 | Reply | Action |
 |-------|--------|
-| `1`, `2`, ..., `N-1` (where `N` is the Skip slot) | Run `flowctl prospect promote <artifact-id> --idea <reply>`. Echo the new epic id and exit. |
+| `1`, `2`, ..., `N-1` (where `N` is the Skip slot) | Run `flowctl prospect promote <artifact-id> --idea <reply>`. Echo the new spec id and exit. |
 | `N`, `skip`, empty string | Print `Skipped. Artifact saved at .flow/prospects/<artifact-id>.md` and exit. |
-| `i`, `interview` | Print suggestion: `Run /flow-next:interview <epic-or-task-id> to refine. Artifact saved at .flow/prospects/<artifact-id>.md`. **Do not auto-invoke** — the user picks the target id. |
+| `i`, `interview` | Print suggestion: `Run /flow-next:interview <spec-or-task-id> to refine. Artifact saved at .flow/prospects/<artifact-id>.md`. **Do not auto-invoke** — the user picks the target id. |
 | anything else | Reprint the menu once with `Unrecognized choice: <reply>`. On second invalid reply, print `Skipped (no valid choice). Artifact saved at .flow/prospects/<artifact-id>.md` and exit cleanly. |
 
 ### 6.4 — Exit cleanly regardless

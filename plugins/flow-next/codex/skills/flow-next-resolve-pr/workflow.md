@@ -6,9 +6,9 @@ Execute these phases in order. Each phase gates on the prior one. Stop on error 
 
 ```bash
 set -e
-FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$HOME/.codex}}/scripts/flowctl"
+FLOWCTL="$HOME/.codex/scripts/flowctl"
 [ -x "$FLOWCTL" ] || FLOWCTL=".flow/bin/flowctl"
-SCRIPTS="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/skills/flow-next-resolve-pr/scripts"
+SCRIPTS="$HOME/.codex/skills/flow-next-resolve-pr/scripts"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 ```
 
@@ -27,16 +27,26 @@ Strip flags first; remaining token is the target.
 ```bash
 DRY_RUN=0
 NO_CLUSTER=0
+AUTONOMOUS=0
 TARGET=""
 
 for arg in $ARGUMENTS; do
  case "$arg" in
  --dry-run) DRY_RUN=1 ;;
  --no-cluster) NO_CLUSTER=1 ;;
+ mode:autonomous) AUTONOMOUS=1 ;;
  *) TARGET="$arg" ;;
  esac
 done
+
+# Secondary signal: process-level autonomous driver (env survives only
+# within one process tree; the token is the primary, prose-safe carrier).
+if [[ "${FLOW_AUTONOMOUS:-}" == "1" ]]; then
+ AUTONOMOUS=1
+fi
 ```
+
+`AUTONOMOUS=1` flips question-suppression branches ONLY (Phase 10): the needs-human surface reports instead of blocking, and the run ends with the machine-readable `RESOLVE_PR_VERDICT=` terminal line. Autonomy ≠ Ralph — neither signal sets `FLOW_RALPH`, implies `REVIEW_RECEIPT_PATH` receipt obligations, or activates ralph-guard hooks. Every other phase (triage, demotion/skip logic, cluster gate, dispatch, validation, commit, reply/resolve, the 2-cycle bound) behaves identically in both modes.
 
 Detect mode from `TARGET`. Regex matches are authoritative — do not relax:
 
@@ -231,11 +241,15 @@ fi
 
 ## Phase 5: Dispatch
 
+This is the only backend-divergent phase in the workflow. All other phases are platform-agnostic shell + GraphQL — kept inline per the backend-split heuristic documented in `agent_docs/adding-skills.md`.
+
 ### Platform detection
 
 - **Claude Code** exposes the `Task` tool with `subagent_type` parameter → parallel dispatch.
 - **Codex** (0.102.0+) ships native multi-agent role support. `pr-comment-resolver.toml` installs into `~/.codex/agents/` via `scripts/install-codex.sh`; spawn in parallel using Codex's multi-agent orchestration (same pattern as planning scouts).
 - **Copilot / Droid** → serial loop (execute resolver steps inline, one unit at a time).
+
+Default to serial when in doubt — output is identical, only throughput differs.
 
 ### Parallel dispatch (Claude Code + Codex) — with file-overlap avoidance
 
@@ -249,7 +263,7 @@ fi
  Pass the inputs documented in `agents/pr-comment-resolver.md`.
 6. Collect all verdict JSONs.
 
-### Serial (Copilot / Droid)
+### Serial dispatch (Copilot / Droid)
 
 Loop over `UNITS` in cluster-first order (clusters carry higher leverage). For each unit, perform the resolver steps inline — read code, decide verdict, compose reply, apply any edits — following `agents/pr-comment-resolver.md`. Append the verdict JSON to `VERDICTS`.
 
@@ -321,7 +335,7 @@ Per unit:
 # contains spaces or newlines — which is the common case for human-facing
 # replies. Read line-by-line instead so each loop body receives one complete
 # verdict object.
-jq -c '.[]' <<<"$VERDICTS_JSON" | while IFS= read -r VERDICT; do
+jq -c '.[]' <<<"$VERDICTS" | while IFS= read -r VERDICT; do
  FB_TYPE=$(jq -r .feedback_type <<<"$VERDICT")
  FB_ID=$(jq -r .feedback_id <<<"$VERDICT")
  REPLY=$(jq -r .reply_text <<<"$VERDICT")
@@ -339,7 +353,7 @@ jq -c '.[]' <<<"$VERDICTS_JSON" | while IFS= read -r VERDICT; do
 done
 ```
 
-`$VERDICTS_JSON` is the full array of verdict objects as a single JSON string
+`$VERDICTS` is the full array of verdict objects as a single JSON string
 (as produced in Phase 6). `jq -c '.[]'` emits one compact JSON object per
 line; `while read -r` keeps each object intact through the pipe.
 
@@ -363,6 +377,30 @@ If `REMAINING > 0` **and** some of those threads aren't in the `needs-human` set
  Recurring theme: <common category / file / concern>
  Suggest addressing at the architecture level before continuing.
  ```
+
+The 2-cycle bound is identical in both modes. Under `AUTONOMOUS=1` the escalation still stops the loop here; Phase 10 then reports it as part of the `NEEDS_HUMAN` verdict instead of waiting on the user.
+
+---
+
+## Phase 9.5: Tracker sync (opt-in) — optional resolution comment
+
+**Optional. Runs only when the tracker bridge is active AND `resolvePr` is opted in, after the resolution pass settles (Phase 9 found nothing left to loop on, or only `needs-human` threads remain). With no tracker configured this is a no-op.** Posts an optional resolution comment to the linked tracker issue summarizing what was addressed on the PR — append-only (R8), conflict-free.
+
+The linked spec id comes from the PR's spec association (the same `SPEC_ID` make-pr used; resolve `flowctl show <spec-id>` from the branch / PR body breadcrumb as elsewhere in this skill).
+
+```bash
+if [ "$($FLOWCTL sync active --json | jq -r '.active')" = "true" ] \
+ && [ "$($FLOWCTL config get tracker.perEvent.resolvePr --json | jq -r '.value')" != "off" ] \
+ && [ "$($FLOWCTL config get tracker.perEvent.resolvePr --json | jq -r '.value')" != "null" ]; then
+ # Invoke the flow-next-tracker-sync skill: append a one-line resolution comment
+ # to the linked issue (e.g. "Addressed N of M review items on PR #<NUMBER>").
+ # skill: flow-next-tracker-sync (operation: comment <spec-id>)
+ # Unlinked spec → flow-first push (create + link) first, then comment
+ # (tracker-sync §Phase 3 create-if-unlinked). No-op only if no transport reachable.
+ # Best-effort — never blocks the resolve-pr summary.
+ :
+fi
+```
 
 ---
 
@@ -391,9 +429,28 @@ Still pending from a previous run (count):
  Previous reply: <comment URL>
 ```
 
-For `needs-human` entries **and** "still pending" entries where the user might want to weigh in: invoke `request_user_input`. Wait for response; apply decisions; loop back to Phase 5 for any newly actionable items.
+**Ask the user via plain text.** Render the options below as a numbered list `1.` … `N.`, followed by a final option `N+1. Other — type your own answer`. Print the question, then the numbered list, then **stop and wait for the user's next message before continuing**. Parse the reply as: a bare number `1`–`N+1` → that option; the literal text of an option label → that option; free text after `Other` → custom answer.
+
+**Interactive mode (`AUTONOMOUS=0`):** for `needs-human` entries **and** "still pending" entries where the user might want to weigh in: invoke `plain-text numbered prompt`. Wait for response; apply decisions; loop back to Phase 5 for any newly actionable items.
 
 If none block, exit 0 with the printed summary.
+
+**Autonomous mode (`AUTONOMOUS=1`):** there is no user to answer — never wait on a question. Instead:
+
+- For each `needs-human` entry, emit one report line after the summary: `NEEDS_HUMAN: <path:line | comment id> — <one-line reason from decision_context.why_needs_decision>`. The threads stay open (Phase 8 already skipped resolving them); no decision is applied, no loop back to Phase 5.
+- The cycle-3 escalation from Phase 9, if it fired, counts as one `NEEDS_HUMAN` line: `NEEDS_HUMAN: cycle-budget — <recurring theme, one line>`.
+- End the run with exactly ONE machine-readable terminal line — the LAST line of output, nothing after it (the dispatching loop is transcript-blind and gates on it):
+
+ ```
+ RESOLVE_PR_VERDICT=<RESOLVED|PENDING|NEEDS_HUMAN> threads=<n> fixed=<n> needs_human=<n>
+ ```
+
+ - `NEEDS_HUMAN` — ≥1 `NEEDS_HUMAN` line was emitted (needs-human verdicts or the cycle-3 escalation).
+ - `PENDING` — no needs-human, but threads still await a reviewer ("still pending" set non-empty, or replies posted this run that a reviewer has not yet re-checked). The dispatcher re-checks on its next tick.
+ - `RESOLVED` — everything new was addressed: no needs-human, nothing pending. (Includes the "no open feedback" / "nothing new to address" fast paths: `threads=0`.)
+ - Counts: `threads` = new items processed this run, `fixed` = `fixed` + `fixed-differently` verdicts, `needs_human` = `NEEDS_HUMAN` lines emitted.
+
+Interactive runs never print the `RESOLVE_PR_VERDICT=` line.
 
 ---
 

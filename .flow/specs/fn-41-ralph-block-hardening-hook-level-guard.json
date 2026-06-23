@@ -1,0 +1,18 @@
+{
+  "branch_name": "fn-41-ralph-block-hardening-hook-level-guard",
+  "completion_review_status": "ship",
+  "completion_reviewed_at": "2026-05-21T14:13:12.144194Z",
+  "created_at": "2026-05-06T21:44:09.321807Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [],
+  "id": "fn-41-ralph-block-hardening-hook-level-guard",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-41-ralph-block-hardening-hook-level-guard.md",
+  "status": "done",
+  "title": "Ralph-block hardening: hook-level guard for user-only skills",
+  "updated_at": "2026-05-21T14:13:12.311107Z"
+}

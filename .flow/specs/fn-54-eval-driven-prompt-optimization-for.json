@@ -1,0 +1,30 @@
+{
+  "branch_name": "fn-54-eval-driven-prompt-optimization-for",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
+  "created_at": "2026-06-04T20:35:03.796497Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [
+    "fn-60-ship-loop-skill-autonomous-pr"
+  ],
+  "id": "fn-54-eval-driven-prompt-optimization-for",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-54-eval-driven-prompt-optimization-for.md",
+  "status": "open",
+  "title": "Eval-driven prompt optimization for flow-next skills & agents",
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "id": "FLOW-5",
+    "identifier": "FLOW-5",
+    "lastSyncedAt": "2026-06-04T21:19:49.753625Z",
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": "https://linear.app/gmickel/issue/FLOW-5"
+  },
+  "updated_at": "2026-06-11T13:33:35.857981Z"
+}

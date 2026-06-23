@@ -7,6 +7,7 @@ Execute these phases in order. Each gates on the prior. Stop on user-blocking er
 ```bash
 set -e
 FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/flowctl"
+[ -x "$FLOWCTL" ] || FLOWCTL=".flow/bin/flowctl"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 EPICS_DIR="$REPO_ROOT/.flow/epics"
 SPECS_DIR="$REPO_ROOT/.flow/specs"
@@ -23,7 +24,7 @@ The Ralph-block (SKILL.md) runs before this preamble. Phase 0 starts after the R
 
 ## Phase 0: Pre-flight (R5, R6, R8)
 
-**Goal:** catch the three conditions that make capture unsafe BEFORE drafting a spec — duplicate epics, compacted conversation, idempotency conflict. Each has its own decision branch.
+**Goal:** catch the three conditions that make capture unsafe BEFORE drafting a spec — duplicate specs, compacted conversation, idempotency conflict. Each has its own decision branch.
 
 ### 0.1 — Extract candidate keywords from conversation
 
@@ -34,19 +35,21 @@ Capture's input is the conversation, not `$ARGUMENTS`. Walk the visible user tur
 - **Domain-specific terms** — multi-word phrases the user repeated (e.g. "rate limiter", "OAuth callback", "review walkthrough").
 - **Quoted phrases** — anything the user put in `"..."` or `\`...\`` while describing the feature.
 
-Cap the candidate keyword list at the top **10** by frequency. These feed both 0.2 (epic title overlap) and 0.3 (memory search). Strip ordinary English connectors (`the`, `a`, `and`, `or`, `to`, `for`, `with`, `via`).
+Cap the candidate keyword list at the top **10** by frequency. These feed both 0.2 (spec title overlap) and 0.3 (memory search). Strip ordinary English connectors (`the`, `a`, `and`, `or`, `to`, `for`, `with`, `via`).
 
-### 0.2 — Duplicate detection: epic title overlap
+### 0.2 — Duplicate detection: spec title overlap
+
+Scan both `.flow/specs/*.json` (post-1.0 canonical) and `.flow/epics/*.json` (legacy alias dir on unmigrated 0.x repos). Both paths are walked because `flowctl init` (post-1.0) writes only `.flow/specs/`, but pre-migration repos still keep their JSON metadata under `.flow/epics/` until `flowctl migrate-rename` runs.
 
 ```bash
 shopt -s nullglob
-EPIC_FILES=( "$EPICS_DIR"/*.json )
+SPEC_FILES=( "$SPECS_DIR"/*.json "$EPICS_DIR"/*.json )
 shopt -u nullglob
 ```
 
-For each epic JSON, read `id` + `title` + `status`. Skip closed epics (`status: closed`).
+For each spec JSON, read `id` + `title` + `status`. Skip closed specs (`status: closed`).
 
-For each remaining epic, compute keyword overlap with the conversation keywords. Count **strong matches** — proper nouns / file paths / multi-word phrases that appear in both. Common single English words are not strong matches.
+For each remaining spec, compute keyword overlap with the conversation keywords. Count **strong matches** — proper nouns / file paths / multi-word phrases that appear in both. Common single English words are not strong matches.
 
 | Strong matches | Action |
 |----------------|--------|
@@ -54,7 +57,7 @@ For each remaining epic, compute keyword overlap with the conversation keywords.
 | 2 | **Potential** duplicate — surface at Phase 0.5 with `proceed-anyway` recommended |
 | 3+ | **Likely** duplicate — surface at Phase 0.5 with `extend` (or `supersede`) recommended |
 
-Record the matched epic ids + their titles for the Phase 0.5 question.
+Record the matched spec ids + their titles for the Phase 0.5 question.
 
 ### 0.3 — Duplicate detection: memory search cross-check
 
@@ -66,7 +69,7 @@ If `flowctl memory list --json` reports memory is initialized, run a cross-check
 "$FLOWCTL" memory search "<keyword-3>" --json --limit 5 2>/dev/null
 ```
 
-Memory hits are advisory — they signal "you may have prior art on this topic" without blocking. Aggregate hit ids + titles for the Phase 4 read-back's "Related context" footnote (when ≥1 hits land). They do **not** trigger the duplicate-detection branch on their own; only epic-title overlap (0.2) does.
+Memory hits are advisory — they signal "you may have prior art on this topic" without blocking. Aggregate hit ids + titles for the Phase 4 read-back's "Related context" footnote (when ≥1 hits land). They do **not** trigger the duplicate-detection branch on their own; only spec-title overlap (0.2) does.
 
 If memory is not initialized (`memory list` returns the `Memory not initialized` error), skip this step silently. Memory search is a quality-of-life signal; absence is not blocking.
 
@@ -138,11 +141,11 @@ When 0.2 detected ≥2 strong matches AND `REWRITE_TARGET` is empty:
 Format the question via `AskUserQuestion`:
 
 - **header**: `Duplicate?`
-- **body**: `Found <N> potentially overlapping epic(s): <epic-1> "<title-1>", <epic-2> "<title-2>". Recommended: <extend|proceed-anyway> — <one-sentence rationale>. Confidence: [<tier>].`
+- **body**: `Found <N> potentially overlapping spec(s): <spec-1> "<title-1>", <spec-2> "<title-2>". Recommended: <extend|proceed-anyway> — <one-sentence rationale>. Confidence: [<tier>].`
 - **options** (frozen labels, no recommendation marker on the option itself):
-  - `extend <epic-id>` — add criteria to the existing epic (capture exits; skill suggests `--rewrite <id>` rerun)
-  - `supersede <epic-id>` — close the old epic and capture this one fresh (capture proceeds; the user closes the old one manually after capture lands)
-  - `proceed-anyway` — accept that two epics will live alongside each other (capture proceeds)
+  - `extend <spec-id>` — add criteria to the existing spec (capture exits; skill suggests `--rewrite <id>` rerun)
+  - `supersede <spec-id>` — close the old spec and capture this one fresh (capture proceeds; the user closes the old one manually after capture lands)
+  - `proceed-anyway` — accept that two specs will live alongside each other (capture proceeds)
   - `abort` — exit cleanly, no write
 
 Recommendation logic:
@@ -152,18 +155,18 @@ Recommendation logic:
 | 3+ | `extend <strongest-id>` | `[high]` |
 | 2 | `proceed-anyway` | `[judgment-call]` |
 
-If the user picks `extend`, exit 0 with: `Re-run with --rewrite <epic-id> to overwrite the existing spec, or invoke /flow-next:interview <epic-id> to refine via Q&A.`
+If the user picks `extend`, exit 0 with: `Re-run with --rewrite <spec-id> to overwrite the existing spec, or invoke /flow-next:interview <spec-id> to refine via Q&A.`
 
 If `supersede` or `proceed-anyway`, store the choice and continue to Phase 1.
 
 In **autofix mode**, when 0.2 detected ≥2 strong matches AND `REWRITE_TARGET` is empty:
 
 ```text
-Error: <N> potentially overlapping epic(s) detected: <epic-1>, <epic-2>.
+Error: <N> potentially overlapping spec(s) detected: <spec-1>, <spec-2>.
 Capture cannot resolve duplicates in autofix mode.
 
 Options:
-  - Re-run with --rewrite <epic-id> to overwrite a specific epic.
+  - Re-run with --rewrite <spec-id> to overwrite a specific spec.
   - Re-run interactively (drop mode:autofix) to choose extend / supersede / proceed-anyway.
 ```
 
@@ -173,14 +176,14 @@ Exit 2.
 
 If `REWRITE_TARGET` is set:
 
-- Validate the target exists **and is an epic** (not a task — `flowctl show` accepts both, but capture only writes specs to epic IDs):
+- Validate the target exists **and is a spec** (not a task — `flowctl show` accepts both, but capture only writes specs to spec IDs):
 
   ```bash
-  out=$("$FLOWCTL" show "$REWRITE_TARGET" --json) || { echo "Error: --rewrite target $REWRITE_TARGET does not exist. Drop --rewrite to create a new epic, or pick an existing epic id." >&2; exit 2; }
+  out=$("$FLOWCTL" show "$REWRITE_TARGET" --json) || { echo "Error: --rewrite target $REWRITE_TARGET does not exist. Drop --rewrite to create a new spec, or pick an existing spec id." >&2; exit 2; }
   if echo "$out" | jq -e '.tasks' >/dev/null 2>&1; then
-    : # epic — has .tasks array
+    : # spec — has .tasks array
   else
-    echo "Error: --rewrite target $REWRITE_TARGET is a task, not an epic. Pass an epic id (fn-N-slug, no .M suffix)." >&2
+    echo "Error: --rewrite target $REWRITE_TARGET is a task, not a spec. Pass a spec id (fn-N-slug, no .M suffix)." >&2
     exit 2
   fi
   ```
@@ -190,13 +193,13 @@ If `REWRITE_TARGET` is set:
 
 If `REWRITE_TARGET` is empty, also scan the visible conversation for prior-capture artifact references — patterns like `Spec captured at .flow/specs/<id>.md` from earlier turns. If found:
 
-- **Interactive:** ask via `AskUserQuestion` whether the user wants to (a) `--rewrite <id>` (re-run with the flag), (b) `proceed` (create a new epic anyway, accepting that two specs result), (c) `abort`.
+- **Interactive:** ask via `AskUserQuestion` whether the user wants to (a) `--rewrite <id>` (re-run with the flag), (b) `proceed` (create a new spec anyway, accepting that two specs result), (c) `abort`.
 - **Autofix:** exit 2 with: `Error: prior capture artifact <id> detected in conversation. Re-run with --rewrite <id> to overwrite, or interactively to choose. Pass --yes only after picking a path.`
 
 ### Done when
 
 - Conversation keywords are extracted (top-10).
-- Epic-title overlap scan ran; matches recorded.
+- Spec-title overlap scan ran (`.flow/specs/` + legacy `.flow/epics/`); matches recorded.
 - Memory cross-check ran (if memory initialized) and aggregated.
 - Compaction check passed (or `--from-compacted-ok` overrode it).
 - Idempotency resolution is clear: either `REWRITE_TARGET` is set + validated, or no prior-capture artifact conflict, or the user chose proceed/supersede.
@@ -251,10 +254,10 @@ For 1-2 file references, investigate on the main thread — no subagent overhead
 
 ### 1.3 — Initial title extraction
 
-From the conversation, draft a candidate epic title. Heuristic:
+From the conversation, draft a candidate spec title. Heuristic:
 
 - The shortest noun phrase that captures the goal (e.g. "Rate limit OAuth callbacks", "Audit memory entries", "Capture conversation as spec").
-- Avoid verbs at the front (Linear / GitHub epic convention prefers noun phrases).
+- Avoid verbs at the front (Linear / GitHub convention prefers noun phrases).
 - 60 chars max.
 
 The title may be `[inferred]` if the conversation never named one explicitly. Phase 3's must-ask case (a) fires when the title is genuinely ambiguous from conversation — multiple plausible titles, none load-bearing.
@@ -263,7 +266,7 @@ The title may be `[inferred]` if the conversation never named one explicitly. Ph
 
 - The `## Conversation Evidence` block is drafted (≤30 lines verbatim user quotes).
 - Optional subagent investigation completed; references_verified / missing recorded.
-- A candidate epic title is drafted (with confidence — high if user used the phrase, low if agent invented it).
+- A candidate spec title is drafted (with confidence — high if user used the phrase, low if agent invented it).
 
 ---
 
@@ -284,26 +287,29 @@ Every acceptance criterion line, every decision-context line, and every scope-bo
 
 Pure prose sections (Goal & Context narrative, Architecture overview) do not need per-line tags — but the **whole section** carries a section-level tag in a frontmatter-style note: e.g. `<!-- Goal & Context: 70% [user], 30% [inferred] -->`. Phase 4 read-back surfaces this.
 
-### 2.2 — Apply the CLAUDE.md richer template
+### 2.2 — Apply the canonical spec template
 
-Draft these sections in order. The first section after frontmatter is **always** `## Conversation Evidence` (Phase 1 output verbatim). Then:
+The canonical section structure lives in [`plugins/flow-next/templates/spec.md`](../../templates/spec.md) — the single source of truth for the section sequence and per-section ownership annotations (per R17 — never re-embed the section list inline; cross-link the template). At runtime the template is resolved via the 4-tier discovery cascade (first match wins): `<repo_root>/SPEC.md` → `<repo_root>/spec.md` → `.flow/templates/spec.md` → bundled `${PLUGIN_ROOT}/templates/spec.md`. The bundled file is the canonical source of truth; earlier tiers are user-customized overrides. Walk the resolved template in its declared order and draft each section's body using the source-tag conventions below. Before any template section, prepend `## Conversation Evidence` (Phase 1 output verbatim); after the template, append `## Requirement coverage` (the R-ID → task mapping placeholder).
 
-- `## Goal & Context` — why this exists, what problem it solves. Mostly `[user]` / `[paraphrase]`.
-- `## Architecture & Data Models` — system design, data flow, key components. **File / component refs are `[inferred]` unless the user explicitly named them in conversation.** If Phase 1.2 verified a reference, tag `[paraphrase]`.
-- `## API Contracts` — endpoints, interfaces, input/output shapes. Often `[inferred]` because conversation rarely specifies wire formats. Mark accordingly.
-- `## Edge Cases & Constraints` — failure modes, limits, performance reqs. Mix of `[user]` and `[inferred]`.
-- `## Acceptance Criteria` — testable; R-IDs (`- **R1:** ...`); each tagged. **R-IDs allocate sequentially from R1** — capture creates fresh epics, no renumber concern.
-- `## Boundaries` — explicit out-of-scope. Often `[inferred]` from what the user did NOT say. Surface at read-back as agent-decided defaults.
-- `## Decision Context` — why this approach over alternatives. Preserve any rejected alternatives the user mentioned (Linear-pattern: rejected options live in spec history, not flow off-screen).
+Source-tag application is per-tag, not per-section:
 
-Followed by:
+- **`[user]`** dominates where the conversation gave verbatim content (goal framing, user-stated acceptance, named non-goals, rejected alternatives the user surfaced).
+- **`[paraphrase]`** is for spec-language restatements of user intent — preserving meaning, tightening wording.
+- **`[inferred]`** covers agent fill-in for completeness (default conventions: error formats, retry policies, observability hooks, file / component refs the user did NOT name). **Untouched by §2.6 biz-routing** — biz destinations only accept `[user]` / `[paraphrase]`.
+- **`[strategy:<track>]`** activates only when Phase 0 strategy snapshot was populated.
 
-- `## Requirement coverage` — table mapping each R-ID to "fn-N.M (TBD — populate via /flow-next:plan)" placeholder. Capture ships unbroken-down epics; `/flow-next:plan` does the breakdown later.
+Auxiliary section rules layered on the template:
+
+- **Phase 1.2 verified references** — if a subagent verified that a user-named file / component actually exists in the codebase, upgrade the tag from `[inferred]` → `[paraphrase]` for that line.
+- **Sections without conversation signal stay absent.** Do NOT auto-populate a template section from agent assumptions just because the template has a slot for it. Empty-by-default beats fabricated-by-default.
+- **`## Decision Context`** substructure (FLAT vs `### Motivation` / `### Implementation Tradeoffs` per the template's "(A) FLAT" vs "(B) SUBSTRUCTURED" branches) is governed by §2.6 — capture only emits SUBSTRUCTURED when biz-context routing has content for `### Motivation`; otherwise stays FLAT.
+- **`## Acceptance Criteria`** R-IDs allocate sequentially from R1 — capture creates fresh specs, no renumber concern. Outcome-AC entries (user-facing "what success looks like") route via biz-context signal category 3 (§2.6); other criteria stay generic.
+- **`## Requirement coverage`** appended after the template body — table mapping each R-ID to `fn-N.M (TBD — populate via /flow-next:plan)` placeholders. Capture ships unbroken-down specs; `/flow-next:plan` does the breakdown later.
 
 ### 2.3 — R-ID allocation rules (R15)
 
 - Use the prose prefix format: `- **R1:** ...`, `- **R2:** ...`, etc.
-- Allocate sequentially from R1 in creation order. Capture-created epics have never been reviewed → no renumber concern (the renumber-forbidden rule from `flow-next-plan/steps.md:227-262` only applies after a review cycle).
+- Allocate sequentially from R1 in creation order. Capture-created specs have never been reviewed → no renumber concern (the renumber-forbidden rule from `flow-next-plan/steps.md:227-262` only applies after a review cycle).
 - R-IDs in `## Acceptance Criteria` and `## Requirement coverage` must match.
 - Plain markdown prose, not YAML.
 
@@ -322,11 +328,78 @@ Track `[inferred]` count across all sections (especially in `## Acceptance Crite
 
 If Phase 2 produces **8 or more acceptance criteria**, Phase 4 read-back includes a `consider splitting?` option. The skill **never auto-splits**. The user decides:
 
-- Accept the larger epic.
+- Accept the larger spec.
 - Edit (drop / reword criteria).
 - Approve and run `/flow-next:plan <id>` afterward — plan can break it into multiple stages.
 
 Capture's heuristic: ≥8 R-IDs is the trigger. The 8+ count itself goes into the read-back body.
+
+### 2.6 — Biz-context signal routing (R24) + signal-category count for R25
+
+While drafting §2.2's sections, walk the Phase 1 `## Conversation Evidence` block looking for explicit business-context signals across **nine SIGNAL CATEGORIES** (the counting unit for R25's sparse-suggestion heuristic). For each category that has at least one explicit signal in conversation, route the content to its destination using only `[user]` or `[paraphrase]` source tags. The full routing table with example trigger phrasing lives in [phases.md §Biz-context signal routing](phases.md). Summary:
+
+| # | Signal category | Destination(s) |
+|---|-----------------|----------------|
+| 1 | Target user / persona | `Goal & Context` |
+| 2 | Problem framing / why-now | `Goal & Context` |
+| 3 | Success metrics / definition of done | outcome-AC + `## Decision Context > ### Motivation` |
+| 4 | MVP scope / "not doing X yet" | `Boundaries` |
+| 5 | Business constraints (regulatory, deadlines, budget) | `Goal & Context` OR `## Decision Context > ### Motivation` |
+| 6 | What NOT to build / non-goals | `Boundaries` |
+| 7 | Prioritization rationale | `## Decision Context > ### Motivation` |
+| 8 | Business risks | `Goal & Context` OR `## Decision Context > ### Motivation` |
+| 9 | UX expectations | `Goal & Context` |
+
+Rules:
+
+- **Source tags restricted to `[user]` or `[paraphrase]`** for biz-routed content. `[inferred]` never routes to a business destination. If a category has no conversation signal, its destination(s) receive no new content — sections without conversation signal stay absent (no empty-section auto-populate; this is the R22 invariant).
+- **One signal can land in multiple destinations** (e.g., a success metric becomes both an outcome-AC R-ID and a `### Motivation` rationale entry) — that still counts as **one** SIGNAL CATEGORY for the R25 threshold. Counting is over R24's nine categories, not over markdown destinations.
+- **Decision Context substructure** — capture only ever writes fresh specs (never a rewrite of an existing FLAT body), so there is no FLAT→substructured promotion to handle here (that's `/flow-next:interview`'s merge contract). Decision rule for capture: when category 3, 5, 7, or 8 routes content, write `## Decision Context` as SUBSTRUCTURED — emit the `### Motivation` H3 with the routed content. Leave `### Implementation Tradeoffs` absent (do NOT write the `*Pending technical-scope interview pass.*` placeholder; that's `/flow-next:interview --scope=business`'s responsibility on a rewrite, not capture's). When none of categories 3, 5, 7, 8 carry content, write `## Decision Context` as FLAT — preserves R22 (solo dev with zero biz signals sees no Motivation/Implementation Tradeoffs scaffolding) and matches the canonical template's "(A) FLAT (default, R22 backward-compat)" branch.
+- **Constraints / risks (categories 5, 8) pick one destination per signal** — `Goal & Context` when the constraint sets up framing, `### Motivation` when it's the reason behind a trade-off. Don't double-route to both for the same signal.
+
+After §2.2's section drafting completes, compute `BIZ_SIGNAL_CATEGORIES` — the count of distinct categories (out of nine) that received at least one `[user]` or `[paraphrase]` line. This count is Phase 6's input to `flowctl scope suggest`:
+
+```bash
+# Set after drafting §2.2's sections. Range: 0..9. Counts CATEGORIES, not destinations.
+# Example: a conversation that named a target user, an MVP boundary, and rejected a feature
+# (categories 1, 4, 6) sets BIZ_SIGNAL_CATEGORIES=3 even though it touched only two destinations
+# (Goal & Context + Boundaries).
+BIZ_SIGNAL_CATEGORIES=<int>
+```
+
+Worked example — conversation: *"For junior engineers, we need a one-click upgrade flow. MVP is just the install path — no rollback yet. We definitely won't support Windows."*
+
+- Category 1 (target user: "junior engineers") → `Goal & Context` [user]
+- Category 4 (MVP boundary: "MVP is just the install path") → `Boundaries` [user]
+- Category 6 (non-goals: "won't support Windows") → `Boundaries` [paraphrase]
+- `BIZ_SIGNAL_CATEGORIES=3` → R25 suggestion does NOT fire (threshold is `1 <= N < 3`; 3 means the biz layer is adequate). `## Decision Context` stays FLAT (none of categories 3, 5, 7, 8 had content).
+
+Worked example — conversation: *"This is for the ops team. Definitely don't add a UI."*
+
+- Category 1 (target user: "ops team") → `Goal & Context` [user]
+- Category 6 (non-goals: "don't add a UI") → `Boundaries` [paraphrase]
+- `BIZ_SIGNAL_CATEGORIES=2` → R25 suggestion **fires** (sweet spot — biz signals present but underspecified). `## Decision Context` stays FLAT.
+
+Worked example — conversation: *"add timestamps to log lines"* (purely technical, zero biz signals):
+
+- No category carries content → no biz-routed lines written.
+- `BIZ_SIGNAL_CATEGORIES=0` → R25 suggestion does NOT fire (R22 invariant — solo dev who never mentioned biz context sees zero new prompts). `## Decision Context` stays FLAT.
+
+### 2.7 — New-vocabulary scan (glossary term-add proposals)
+
+Capture joins `/flow-next:interview` as a glossary writer. Gate first — same husk-aware autodetect as interview's doc-aware mode (`total_terms`, never `[[ -f ]]` — a `# Glossary` husk must not open the gate):
+
+```bash
+GLOSSARY_TERMS=$("$FLOWCTL" glossary list --json 2>/dev/null | jq -r '.total_terms // 0')
+```
+
+- `GLOSSARY_TERMS == 0` (absent, husk, or flowctl error) → **silent skip**: `GLOSSARY_PROPOSALS` stays empty, nothing downstream changes. Bootstrap is `/flow-next:prime`'s job, never capture's.
+- `GLOSSARY_TERMS > 0` → scan the conversation evidence for genuinely NEW project vocabulary. A term qualifies when ALL hold:
+  1. **Used repeatedly** — appears in ≥2 user turns (or once + load-bearing for an acceptance criterion).
+  2. **Project-specific** — a coined noun / flow / distinction, not generic English ("receipt gate" yes; "function" no).
+  3. **Absent from the glossary** — no existing entry matches on `term` or `avoid` aliases (case-insensitive, whitespace-collapsed — the `_glossary_term_matches` contract; do not reinvent matching logic).
+
+Collect at most **5** proposals (`GLOSSARY_PROPOSALS`), each with a one-line definition drawn from how the user actually used the term. Proposals surface at Phase 4 read-back; writes happen only in Phase 5.8 after consent.
 
 ### Done when
 
@@ -335,6 +408,8 @@ Capture's heuristic: ≥8 R-IDs is the trigger. The 8+ count itself goes into th
 - `[inferred]` count is computed.
 - 8+ acceptance count flag set if applicable.
 - Untestable acceptance candidates flagged for Phase 3 must-ask.
+- `BIZ_SIGNAL_CATEGORIES` (0..9) computed for Phase 6 R25 dispatch.
+- `GLOSSARY_PROPOSALS` collected (≤5; empty when the glossary gate is closed).
 
 ---
 
@@ -348,7 +423,7 @@ The must-ask cases are listed in [phases.md](phases.md) with examples. Summary h
 |------|---------|----------------------|---------|
 | **(a) Ambiguous title** | Multiple plausible titles, none load-bearing in conversation | Ask user to pick title from candidates + offer custom | exit 2 |
 | **(b) Untestable acceptance** | Phase 2.4 flagged ≥1 criterion that can't be made testable | Ask per-criterion: drop / reword / clarify | exit 2 |
-| **(c) Scope-conflict** | Phase 0.5 went `supersede` or `proceed-anyway`, but the new epic's scope still overlaps the old one's | Ask user how to disambiguate boundaries | exit 2 |
+| **(c) Scope-conflict** | Phase 0.5 went `supersede` or `proceed-anyway`, but the new spec's scope still overlaps the old one's | Ask user how to disambiguate boundaries | exit 2 |
 
 ### 3.1 — Interactive question shape
 
@@ -410,7 +485,7 @@ Construct the full draft including:
 6. **8+ acceptance-criterion suggestion** (if Phase 2.5 fired):
    ```
    This spec has 11 acceptance criteria — consider splitting into multiple
-   epics? You can: approve as-is, edit (drop some), or accept and split via
+   specs? You can: approve as-is, edit (drop some), or accept and split via
    /flow-next:plan after capture lands.
    ```
 7. **Related context** footnote (if Phase 0.3 found memory hits):
@@ -418,6 +493,12 @@ Construct the full draft including:
    Related memory entries (not blocking): bug/runtime-errors/oauth-callback-2025-08-12
    ```
 8. **Diff** — if `REWRITE_TARGET` is set, show existing spec → proposed spec diff (unified diff style; only show changed sections in full to keep the read-back navigable).
+9. **Glossary term-add proposals** (only when Phase 2.7 collected any):
+   ```
+   New project vocabulary (N terms, not yet in GLOSSARY.md):
+     - <term> — <one-line definition>
+     - <term> — <one-line definition>
+   ```
 
 ### 4.2 — Interactive read-back
 
@@ -436,6 +517,35 @@ Confidence tier for the recommendation:
 - `[high]` — `[inferred]` count is low (≤2) and no user-facing claims contradict the conversation evidence.
 - `[judgment-call]` — `[inferred]` count is moderate (3-6) or some `[inferred]` items are load-bearing (e.g. core acceptance criteria).
 - `[your-call]` — `[inferred]` count is high (7+) or rewrite-mode with substantive divergence from existing spec.
+
+**Glossary term-add consent (only when `GLOSSARY_PROPOSALS` is non-empty AND the user picked `approve`).** One follow-up question via `AskUserQuestion` — the read-back options above stay frozen; this is a separate ask:
+
+- **header**: `Glossary?`
+- **body**: `Add <N> new term(s) to GLOSSARY.md? <comma-separated terms>. Definitions shown in the read-back above. Recommended: add — they surfaced repeatedly in this conversation. Confidence: [judgment-call].`
+- **options**: `add-all`, `pick` (follow-up multi-select / serial yes-no per term), `skip`
+
+Record the approved subset for Phase 5.8. `skip` → no glossary writes; the spec write proceeds regardless of this answer.
+
+**Mark-ready consent (only when the user picked `approve` AND the readiness visibility predicate holds).** Probe only after `approve`:
+
+```bash
+READY_STATE=$("$FLOWCTL" config get tracker.readyState --json 2>/dev/null | jq -r '.value // empty')
+READY_ADOPTED=$("$FLOWCTL" specs --json 2>/dev/null | jq '[.specs[] | select(.ready == true)] | length' 2>/dev/null || echo 0)
+# Offer IFF READY_ADOPTED >= 1 AND READY_STATE is empty (probe failures degrade to "don't offer").
+```
+
+Both must hold:
+
+- `READY_ADOPTED -ge 1` — readiness is adopted in this repo (≥1 spec already marked ready). First adoption enters via `flowctl spec ready`, the tracker ceremony, or prime — never via this prompt. Non-adopters see no question anywhere (R7-style invisibility).
+- `READY_STATE` empty — `tracker.readyState` is NOT configured. Readiness is a one-way tracker→local pull when the tracker is authoritative; never invite a local edit the next sync would silently revert.
+
+When the predicate holds, one follow-up question via `AskUserQuestion` — the read-back options above stay frozen; this is a separate ask (same shape as the glossary consent):
+
+- **header**: `Mark ready?`
+- **body**: `Mark this spec ready for execution once written? Readiness is adopted in this repo (<READY_ADOPTED> ready spec(s)). Recommended: keep-draft — bless the spec after you've read it on disk; readiness is the human gate, not a capture reflex. Confidence: [judgment-call].`
+- **options** (frozen): `mark-ready` (Phase 5.9 runs `spec ready` after the write), `keep-draft` (default — no readiness write)
+
+Record the answer for Phase 5.9. `keep-draft` → no readiness write; the spec write proceeds regardless of this answer.
 
 ### 4.3 — Edit branch
 
@@ -457,15 +567,21 @@ Print the full read-back payload (4.1) to stdout as a markdown block. Then:
 
 Autofix never offers `edit` — there's no user to ask. The print-then-rerun-with-yes pattern mirrors `flowctl memory migrate --yes` and is the documented autofix-substitute for read-back approval.
 
+**Autofix + glossary proposals:** the payload's item-9 block prints as suggestions (`Suggested glossary adds — review and add via flowctl glossary add "<term>" --definition-file -`), but autofix **never writes terms** — not even with `--yes` (`--yes` consents to the spec write, not to vocabulary changes). Phase 5.8 is interactive-only.
+
+**Autofix + readiness:** autofix **never writes readiness** — not even with `--yes` (Phase 5.9 is interactive-only). When the §4.2 visibility predicate holds AND the spec gets written (`--yes`), Phase 6 appends a one-line suggestion: `Mark ready when blessed: flowctl spec ready <SPEC_ID>`. Without `--yes` nothing is suggested (no spec id exists). Predicate fails → silence — non-adopters and tracker-authoritative repos see nothing.
+
 ### 4.5 — Forbidden in Phase 4
 
 - **Never silently skip the read-back.** Even if `[inferred]` count is 0, show the draft. The user might still want to reject for reasons unrelated to inference.
-- **Never auto-split.** The `consider-split` option exits 0 and lets the user decide; it does not call `flowctl epic create` twice.
+- **Never auto-split.** The `consider-split` option exits 0 and lets the user decide; it does not call `flowctl spec create` twice.
 - **Never edit `--rewrite` target without showing the diff.** The diff is non-optional in rewrite mode.
+- **Never write glossary terms here.** Phase 4 collects consent only; the writes happen in Phase 5.8, after the spec write.
+- **Never write readiness here.** Phase 4 collects the mark-ready consent only; the write happens in Phase 5.9, after the spec write. And never offer the question outside the visibility predicate (readiness adopted + no `tracker.readyState`).
 
 ### Done when
 
-- Interactive: user picked `approve` (proceed to Phase 5), `consider-split` / `abort` (exit 0, no write), or hit the edit-cycle cap.
+- Interactive: user picked `approve` (proceed to Phase 5), `consider-split` / `abort` (exit 0, no write), or hit the edit-cycle cap. On approve, the glossary and mark-ready consents (when their gates fired) are recorded for Phase 5.8/5.9.
 - Autofix with `--yes`: payload printed, proceeding to Phase 5.
 - Autofix without `--yes`: payload printed, exit 0.
 
@@ -473,7 +589,7 @@ Autofix never offers `edit` — there's no user to ask. The print-then-rerun-wit
 
 ## Phase 5: Write via flowctl (R14, R15, R16)
 
-**Goal:** atomic write of the new (or rewritten) epic via existing flowctl plumbing.
+**Goal:** atomic write of the new (or rewritten) spec via existing flowctl plumbing.
 
 ### 5.0 — Strategy contradiction check (gate; runs before any write)
 
@@ -526,7 +642,7 @@ On `yes`, invoke `flowctl memory add` with the override rationale piped via `--b
   --tags strategy-override \
   --body-file - <<EOF
 ## Problem
-Spec for epic <epic-id> contradicts active track "<track-name>" in STRATEGY.md.
+Spec <spec-id> contradicts active track "<track-name>" in STRATEGY.md.
 
 ## What was chosen
 <concise summary of the override decision>
@@ -543,7 +659,7 @@ Spec for epic <epic-id> contradicts active track "<track-name>" in STRATEGY.md.
 - Updating STRATEGY.md instead of overriding here (rejected because: <reason>)
 
 ## Consequences
-- This epic ships in tension with track "<track-name>".
+- This spec ships in tension with track "<track-name>".
 - A future `/flow-next:strategy` run should re-evaluate the track; this decision feeds that conversation.
 EOF
 ```
@@ -552,10 +668,10 @@ On `no`, proceed without writing the decision. Log an audit-trail line to stderr
 
 ```bash
 # On no:
-echo "[STRATEGY OVERRIDE]: track=\"<track-name>\" decision-not-recorded epic=<epic-id>" >&2
+echo "[STRATEGY OVERRIDE]: track=\"<track-name>\" decision-not-recorded spec=<spec-id>" >&2
 
 # On yes (decision was recorded):
-echo "[STRATEGY OVERRIDE]: track=\"<track-name>\" decision-recorded=<entry-id> epic=<epic-id>" >&2
+echo "[STRATEGY OVERRIDE]: track=\"<track-name>\" decision-recorded=<entry-id> spec=<spec-id>" >&2
 ```
 
 The audit trail line appears in both interactive (after the user picks) and autofix (when `OVERRIDE_STRATEGY=1` was passed) — it is the minimum durable record that an override happened, surfaceable in CI logs / git hook output later. In autofix mode (where the AskUserQuestion is unreachable), the decision-not-recorded variant fires unconditionally.
@@ -564,28 +680,33 @@ When `STRATEGY_PRESENT=false`, this entire section is a no-op — there's no str
 
 ### 5.1 — Build the spec body
 
-The spec body assembled in Phase 2 + revised in Phase 4 edit cycles is the input to `flowctl epic set-plan`. Source tags **stay in the spec body** — they are part of the audit trail and survive into the on-disk spec at `.flow/specs/<id>.md`. Future readers (including `/flow-next:plan` and `/flow-next:interview`) see the tags and can scrutinize.
+The spec body assembled in Phase 2 + revised in Phase 4 edit cycles is the input to `flowctl spec set-plan`. Source tags **stay in the spec body** — they are part of the audit trail and survive into the on-disk spec at `.flow/specs/<id>.md`. Future readers (including `/flow-next:plan` and `/flow-next:interview`) see the tags and can scrutinize.
 
-The frontmatter top of the spec is whatever `flowctl epic create` writes (it generates a placeholder via `create_epic_spec`). `epic set-plan` overwrites the placeholder with the captured body — so the captured body should NOT include a duplicate `# <title>` heading; `set-plan` accepts the body as-is and atomic-writes to `.flow/specs/<id>.md`.
+The frontmatter top of the spec is whatever `flowctl spec create` writes (it generates a placeholder via the spec-create plumbing). `spec set-plan` overwrites the placeholder with the captured body — so the captured body should NOT include a duplicate `# <title>` heading; `set-plan` accepts the body as-is and atomic-writes to `.flow/specs/<id>.md`.
 
-### 5.2 — New-epic branch
+### 5.2 — New-spec branch
 
 ```bash
-EPIC_TITLE="<chosen title from Phase 3 or Phase 1.3>"
+SPEC_TITLE="<chosen title from Phase 3 or Phase 1.3>"
 
-# Create the epic — captures the JSON to extract the allocated id.
-EPIC_OUTPUT=$("$FLOWCTL" epic create --title "$EPIC_TITLE" --json)
-EPIC_ID=$(printf '%s' "$EPIC_OUTPUT" | jq -r '.id')
+# Create the spec — captures the JSON to extract the allocated id.
+SPEC_OUTPUT=$("$FLOWCTL" spec create --title "$SPEC_TITLE" --json)
+SPEC_ID=$(printf '%s' "$SPEC_OUTPUT" | jq -r '.id')
 
-if [[ -z "$EPIC_ID" || "$EPIC_ID" == "null" ]]; then
-  echo "Error: epic create failed: $EPIC_OUTPUT" >&2
+if [[ -z "$SPEC_ID" || "$SPEC_ID" == "null" ]]; then
+  echo "Error: spec create failed: $SPEC_OUTPUT" >&2
   exit 1
 fi
 
 # Write the spec body via heredoc.
-"$FLOWCTL" epic set-plan "$EPIC_ID" --file - --json <<EOF
+"$FLOWCTL" spec set-plan "$SPEC_ID" --file - --json <<EOF
 $SPEC_BODY
 EOF
+
+# Run anchor for Phase 6's sync check — written at the write step, BEFORE the
+# 5.7 dispatch, so it lower-bounds this run's receipts (bash vars don't survive
+# across tool calls; this file does).
+date -u +%Y-%m-%dT%H:%M:%SZ > "${TMPDIR:-/tmp}/flow-capture-anchor-${SPEC_ID}"
 ```
 
 Use a real heredoc (not `printf`) so embedded markdown formatting and newlines round-trip cleanly. `read_file_or_stdin` in `flowctl.py` handles `--file -` correctly.
@@ -595,34 +716,52 @@ Use a real heredoc (not `printf`) so embedded markdown formatting and newlines r
 When `REWRITE_TARGET` is set:
 
 ```bash
-EPIC_ID="$REWRITE_TARGET"
+SPEC_ID="$REWRITE_TARGET"
 
-# Skip epic create — the epic already exists. Just overwrite the spec.
-"$FLOWCTL" epic set-plan "$EPIC_ID" --file - --json <<EOF
+# Skip spec create — the spec already exists. Just overwrite the spec body.
+"$FLOWCTL" spec set-plan "$SPEC_ID" --file - --json <<EOF
 $SPEC_BODY
 EOF
+
+# Readiness reset — runs AFTER set-plan: a failed rewrite must not downgrade a
+# blessed spec (Codex review, PR #170 P2). A rewrite is a full re-authoring; any
+# prior blessing no longer applies once the new body lands. Unconditional call:
+# the toggle is idempotent (fn-58.1) — a never-ready spec is a silent no-op (no
+# write, no updated_at bump), so this does NOT turn every rewritten draft into a
+# readiness-adopter. Announce, never confirm — --rewrite already carried the
+# consent.
+READY_RESET=$("$FLOWCTL" spec unready "$SPEC_ID" --json | jq -r '.changed // false')
+
+# Run anchor for Phase 6's sync check — REQUIRED on the rewrite path: created_at
+# is the spec's ORIGINAL creation time here (an earlier run), so an old
+# `event: capture` receipt would false-OK the check and the retro-fire would
+# never fire (Codex review, PR #169 P2).
+date -u +%Y-%m-%dT%H:%M:%SZ > "${TMPDIR:-/tmp}/flow-capture-anchor-${SPEC_ID}"
 ```
+
+When `READY_RESET=true` (the spec WAS ready), Phase 6's rewrite footer carries a one-line reset announcement. When `false`, no readiness line is printed — never announce a reset that didn't happen (zero noise for never-ready specs).
 
 ### 5.4 — Optional branch-name set
 
 If the user named a feature branch in conversation (e.g. "let's call this branch `oauth-rate-limit`"), set it:
 
 ```bash
-"$FLOWCTL" epic set-branch "$EPIC_ID" --branch "<slug>" --json
+"$FLOWCTL" spec set-branch "$SPEC_ID" --branch "<slug>" --json
 ```
 
-Skip silently if no branch was named — `epic create` already populated `branch_name` with the epic id, which is a fine default.
+Skip silently if no branch was named — `spec create` already populated `branch_name` with the spec id, which is a fine default.
 
 ### 5.5 — Capture write failures
 
-If `epic create` fails (e.g. `.flow/` corrupted, disk full): exit 1 with the error. The user has not yet committed anything.
+If `spec create` fails (e.g. `.flow/` corrupted, disk full): exit 1 with the error. The user has not yet committed anything.
 
-If `epic set-plan` fails: the epic JSON exists but the spec is the placeholder. Surface the failure and the rollback option:
+If `spec set-plan` fails: the spec JSON sidecar exists but the markdown body is the placeholder. Surface the failure and the rollback option:
 
 ```text
-Error: epic set-plan failed for <id>. The epic JSON was created but the spec
-write failed. To roll back: rm .flow/epics/<id>.json .flow/specs/<id>.md
-(if it exists). Or re-run capture with --rewrite <id> to retry the spec write.
+Error: spec set-plan failed for <id>. The spec JSON sidecar was created but the
+markdown body write failed. To roll back: rm .flow/specs/<id>.json .flow/specs/<id>.md
+(or .flow/epics/<id>.json on alias-mode 0.x repos). Or re-run capture with
+--rewrite <id> to retry the body write.
 ```
 
 This mirrors the failure semantics in other flowctl commands — partial-state recovery is on the user, but the error is loud.
@@ -638,11 +777,113 @@ Two reasons:
 
 If a future enhancement adds a `--commit` flag, Phase 5 would gain a "stage + commit" branch, but the default stays "no commit, user owns the staging".
 
+### 5.7 — Tracker sync (opt-in) — spec push/pull + merge
+
+**Optional. Runs only when the tracker bridge is active AND `capture` is opted in. With no tracker configured this is a no-op — capture behaves exactly as today.** After the spec is on disk, project the captured/enriched body to the linked (or freshly linked) tracker issue and reconcile two-way (R6): a flow-first capture pushes the body out; a tracker-first spec (one already linked) reconciles the new capture content against the issue via the agentic 3-way merge.
+
+```bash
+if [ "$("$FLOWCTL" sync active --json | jq -r '.active')" = "true" ] \
+   && [ "$("$FLOWCTL" config get tracker.perEvent.capture --json | jq -r '.value')" != "off" ] \
+   && [ "$("$FLOWCTL" config get tracker.perEvent.capture --json | jq -r '.value')" != "null" ]; then
+  # Invoke the flow-next-tracker-sync skill: push/pull/reconcile the spec body
+  # (operation follows the perEvent leaf — push | pull | reconcile).
+  #   skill: flow-next-tracker-sync   (operation: <leaf> <SPEC_ID>, event: capture)
+  # No-ops cleanly if no transport is reachable; genuine body conflicts surface
+  # scoped (interactive) or queue (Ralph — but capture is Ralph-blocked anyway).
+  :
+fi
+```
+
+Best-effort — a tracker failure never blocks the capture. The skill emits its own receipt, event-tagged `--event capture` — the tag Phase 6's end-of-run `sync check` audits.
+
+### 5.8 — Glossary term-adds (consent-gated; interactive only)
+
+Runs only when Phase 4.2's glossary consent approved ≥1 term (which implies `GLOSSARY_TERMS > 0` — the Phase 2.7 gate — and interactive mode; autofix never reaches here). For each approved term:
+
+```bash
+"$FLOWCTL" glossary add "<term>" --definition-file - --json <<EOF
+<one-line definition from the read-back, as approved>
+EOF
+```
+
+Same call site as interview's behavior (b) — `glossary add` is a case-insensitive upsert; stdin keeps quoted phrasing intact. Best-effort: a failed add prints a warning and continues — never blocks the capture (the spec is already on disk). Report `Glossary: added N term(s) (<terms>)` for the Phase 6 footer.
+
+### 5.9 — Mark-ready write (consent-gated; interactive only)
+
+Runs only when Phase 4.2's mark-ready consent recorded `mark-ready` (which implies the visibility predicate held — readiness adopted, no `tracker.readyState` — and interactive mode; autofix never reaches here):
+
+```bash
+"$FLOWCTL" spec ready "$SPEC_ID" --json
+```
+
+Idempotent plumbing (fn-58.1) — re-running is a silent no-op. Best-effort: a failed write prints a warning and continues — never blocks the capture (the spec is already on disk). Report `Readiness: marked ready` for the Phase 6 footer; on `keep-draft` (or when the question never fired) report nothing — zero footer noise outside the consent path.
+
+### 5.10 — HTML render lens (opt-in) — spec artifact + link line
+
+**Gated on `artifacts.html.enabled` — this check is the ONLY addition when the mode is off.** Runs last in Phase 5 (after 5.7–5.9 have settled the spec body and metadata), so the lens renders the final state.
+
+```bash
+HTML_LENS=$("$FLOWCTL" config get artifacts.html.enabled --json | jq -r 'if .value == true then "true" else "false" end')
+```
+
+When `HTML_LENS != true` (off or unset): **skip this entire section.** Load no reference file, write no artifact, open no session, print no artifact-related output — the gate read above is the only cost.
+
+When `HTML_LENS = true`:
+
+1. **Load the disclosure reference** [`plugins/flow-next/references/html-artifacts.md`](../../references/html-artifacts.md) (relative cross-link — resolves from this skill dir in every install layout, same shape as the spec-template link). It owns ALL design and generation rules — hard rules, design contract, spec-lens content, DAG discipline, Lavish flow, pre-publish checklist. Never duplicate its rules here; follow it top to bottom.
+2. **Generate the artifact** at the fixed path (reference §1.3):
+
+   ```bash
+   mkdir -p ".flow/artifacts/${SPEC_ID}"
+   # Host agent generates .flow/artifacts/${SPEC_ID}/spec.html per the reference.
+   ```
+
+   ONE pathway, state-dependent (reference §4): a fresh capture renders the spec-only view (no tasks exist yet); a `--rewrite` of an already-planned spec (tasks exist under it) renders the plan layer too — same generator, same path.
+3. **Update the artifact link line in the spec markdown** per reference §1.4: find the `<!-- flow-next:artifact-link -->` marker and replace that whole line in place; if absent, insert once after the H1 title. Link target follows ignore status (reference §4):
+
+   ```bash
+   if git check-ignore --no-index -q ".flow/artifacts/${SPEC_ID}/spec.html"; then
+     LINK_MODE=local   # file ignored (dir, glob, or exact-path rule) → local-open guidance, never a blob link that 404s
+     # --no-index: an already-tracked artifact still honors a later ignore rule
+   else
+     LINK_MODE=repo    # tracked → repo-relative link
+   fi
+   # Idempotency check — exactly one marker line after EVERY run. Non-fatal
+   # (best-effort contract below): warn and continue, never abort the capture.
+   MARKER_COUNT=$(grep -c 'flow-next:artifact-link' ".flow/specs/${SPEC_ID}.md" || true)
+   if [ "${MARKER_COUNT:-0}" -ne 1 ]; then
+     echo "warn: artifact link line check failed (${MARKER_COUNT:-0} markers in .flow/specs/${SPEC_ID}.md) — link needs manual fix" >&2
+   fi
+   ```
+4. **Run the reference's pre-publish checklist (§8)**, including the self-containment self-check grep (§2) — it must print `OK: self-contained` before the footer may claim the artifact.
+5. **Lavish session — interactive runs only** (reference §7). The guard is in the snippet, not just prose — open and poll sit INSIDE it:
+
+   ```bash
+   LAVISH_OK=true
+   [[ "${MODE:-interactive}" != "interactive" ]] && LAVISH_OK=false   # MODE from SKILL.md mode-detection — autofix never opens
+   [[ -n "${FLOW_AUTONOMOUS:-}" || -n "${FLOW_RALPH:-}" || -n "${REVIEW_RECEIPT_PATH:-}" ]] && LAVISH_OK=false
+   if [[ "$LAVISH_OK" == "true" ]] && command -v lavish-axi >/dev/null 2>&1; then
+     lavish-axi "$(pwd)/.flow/artifacts/${SPEC_ID}/spec.html"   # absolute path — sessions key on it
+     # ...then poll for feedback in the background via `lavish-axi poll` — ONLY inside this guard
+   fi
+   ```
+
+   Each drained annotation maps to an edit of the spec markdown (never the HTML), then the lens regenerates at the same path. `lavish-axi` absent → plain artifact, zero mention of Lavish, never an error.
+
+   **Autofix / non-interactive runs generate only** (`mode:autofix`, or any non-interactive marker — `FLOW_AUTONOMOUS=1`, `FLOW_RALPH=1`, `REVIEW_RECEIPT_PATH`; capture is Ralph-blocked anyway, so autofix is the live case; treat the marker *family* as the gate, not a rigid var list): `LAVISH_OK=false` — never open a session, never poll; at most one stderr line noting pending prompts.
+6. **Record the footer line for Phase 6:** `Artifact: .flow/artifacts/<SPEC_ID>/spec.html (render lens — regenerable; markdown is the record)`.
+
+Best-effort: artifact generation failure is non-fatal — skip the link line, print one stderr note, never block the capture (the spec is already on disk; markdown is the record).
+
 ### Done when
 
-- The new (or rewritten) epic spec is on disk at `.flow/specs/<id>.md`.
-- `EPIC_ID` is known for Phase 6.
+- The new (or rewritten) spec is on disk at `.flow/specs/<id>.md`.
+- `SPEC_ID` is known for Phase 6.
 - Optional branch-name is set if user named one.
+- When the tracker bridge is active and `capture` is opted in, the spec body was pushed/pulled/reconciled to the linked issue (5.7); otherwise this step was a silent no-op.
+- Approved glossary term-adds written (5.8); skipped silently when none were proposed or approved.
+- Mark-ready write applied iff consented (5.9); rewrite branch reset readiness via idempotent `unready` with `READY_RESET` recorded for Phase 6 (5.3).
+- HTML render lens (5.10): with `artifacts.html.enabled` true, `.flow/artifacts/<SPEC_ID>/spec.html` regenerated per the disclosure reference, the spec's marker link line replaced in place (exactly one), and the pre-publish checklist passed; with the mode off/unset, 5.10 was a silent no-op beyond the single config read.
 
 ---
 
@@ -650,19 +891,81 @@ If a future enhancement adds a `--commit` flag, Phase 5 would gain a "stage + co
 
 **Goal:** print the suggested next step. The deliverable is the new spec; this footer tells the user what to do with it.
 
+**Tracker-sync end-of-run check — runs BEFORE the footer.** Read-only audit: did the capture touchpoint (5.7) actually fire (receipt-backed)? It runs independently of 5.7, so a wholesale-skipped dispatch block is still caught. With no tracker configured, `sync check` exits silently in constant time — the footer slot then reads `n/a (bridge inactive)` and nothing else changes. (Capture is Ralph-blocked, so there is no stdout-routing concern — the slot prints where the footer prints.)
+
+```bash
+# --since: the run anchor written at the Phase-5 write step (5.2/5.3). Fallback:
+# created_at — valid for FRESH captures only (spec created this run). The rewrite
+# path MUST have the anchor: created_at is the ORIGINAL creation time there, so
+# any old `event: capture` receipt would false-OK the check (Codex review,
+# PR #169 P2). A Phase-6 "now" would postdate the 5.7 receipt (false-MISSING);
+# updated_at can be bumped by §5.9's ready-toggle after 5.7 — neither is safe.
+ANCHOR_FILE="${TMPDIR:-/tmp}/flow-capture-anchor-${SPEC_ID}"
+if [[ -f "$ANCHOR_FILE" ]]; then
+  SINCE="$(cat "$ANCHOR_FILE")"
+else
+  SINCE="$("$FLOWCTL" show "$SPEC_ID" --json | jq -r '.created_at')"
+fi
+
+"$FLOWCTL" sync check "$SPEC_ID" --events capture --since "$SINCE" --json
+# Empty output → bridge inactive → slot = `n/a (bridge inactive)`. Otherwise
+# `.missing` empty → slot = `OK`; non-empty → retro-fire (below).
+```
+
+**Retro-fire on MISSING — exactly ONE cycle, never blocking:**
+
+1. Record the retro-fire start anchor and echo it (the re-check needs it as `--since`): `date -u +%Y-%m-%dT%H:%M:%SZ`
+2. Invoke the **flow-next-tracker-sync skill directly** — the same dispatch as 5.7, with its `event:` tag: `skill: flow-next-tracker-sync (operation: <leaf> <SPEC_ID>, event: capture)` — NEVER this check block as a wrapper (no recursion).
+3. Re-check with `--since` = the step-1 anchor:
+   `"$FLOWCTL" sync check "$SPEC_ID" --events capture --since "<retro-fire-start>" --json`
+4. Record the final state in the footer slot. Still MISSING after the one cycle is a recorded, visible outcome — never a second retro-fire, never a block (the spec is already on disk; a tracker hiccup must not become a hard stop). Recovery guidance lives in the receipt note + `docs/tracker-sync.md`.
+
+Then the footer. `Tracker sync:` is a REQUIRED line with exactly four states — an explicit `n/a` proves the check ran; an absent line is a skipped check:
+
 ```text
-Spec captured at .flow/specs/<EPIC_ID>.md.
+Spec captured at .flow/specs/<SPEC_ID>.md.
+Tracker sync: <OK | MISSING:capture → retro-fired → OK | MISSING:capture (retro-fire failed: <reason>) | n/a (bridge inactive)>
 
 Next:
-  /flow-next:plan <EPIC_ID>      → research + break into tasks
-  /flow-next:interview <EPIC_ID> → refine via Q&A
+  /flow-next:plan <SPEC_ID>      → research + break into tasks
+  /flow-next:interview <SPEC_ID> → refine via Q&A
 ```
+
+When Phase 5.8 wrote terms, append one line after `Tracker sync:`: `Glossary: added N term(s) (<comma-separated terms>)`. Omit entirely otherwise (including every autofix run).
+
+When Phase 5.9 marked the spec ready, append one line after `Tracker sync:`: `Readiness: marked ready`. Omit entirely otherwise — `keep-draft`, predicate-not-met, and every non-consented run print no readiness line.
+
+When Phase 5.10 wrote the render lens, append one line after `Tracker sync:`: `Artifact: .flow/artifacts/<SPEC_ID>/spec.html (render lens — regenerable; markdown is the record)`. Omit entirely when the mode is off/unset (zero artifact-related output) or when generation failed (5.10's stderr note already reported it).
+
+Autofix only: when the §4.2 visibility predicate holds and the spec was written (`--yes`), append `Mark ready when blessed: flowctl spec ready <SPEC_ID>` (suggestion only — autofix never writes readiness).
+
+### Biz-suggestion footer (R25)
+
+When the conversation has business-context signals but the business layer is sparse, append a one-line suggestion to refine via `/flow-next:interview --scope=business`. The fire/no-fire decision is delegated to `flowctl scope suggest` (T1) — the skill MUST NOT re-implement the `1 <= N < 3` threshold math inline (skill-vs-flowctl architectural rule from `CLAUDE.md`). Input is `$BIZ_SIGNAL_CATEGORIES` — the count computed in [§2.6](#26--biz-context-signal-routing-r24--signal-category-count-for-r25) over the nine SIGNAL CATEGORIES from R24 (target user / problem framing / success metric / MVP boundary / business constraints / what-not-to-build / prioritization rationale / business risks / UX expectations). The count is over categories, not over markdown destinations.
+
+```bash
+# `scope suggest` plain-mode exit codes: 0 = fire, 1 = no-fire. Quiet stdout (`>/dev/null`)
+# keeps the shell branch token-free; `--json` is available when richer output is needed.
+# Threshold (`1 <= N < 3`) lives in flowctl — capture passes the count, flowctl decides.
+# R22 invariant: BIZ_SIGNAL_CATEGORIES=0 → no-fire (exit 1), keeping the solo-dev
+# zero-flag default silent.
+if "$FLOWCTL" scope suggest --signal-categories-count "$BIZ_SIGNAL_CATEGORIES" >/dev/null; then
+  cat <<EOF
+
+This conversation has business-requirements signals; consider
+\`/flow-next:interview --scope=business $SPEC_ID\` to deep-refine the
+business layer.
+EOF
+fi
+```
+
+The literal suggestion phrasing matches the R25 spec verbatim ("business-requirements signals; consider `/flow-next:interview --scope=business <spec-id>`") so the surface text stays generic — capture does not enumerate which categories triggered the suggestion. Informational only — never a blocking prompt.
 
 If Phase 4 surfaced 8+ acceptance criteria AND the user picked `approve` (not `consider-split`), append:
 
 ```text
-Note: this epic has <N> acceptance criteria — /flow-next:plan can stage the
-breakdown into multiple sub-epics if needed.
+Note: this spec has <N> acceptance criteria — /flow-next:plan can stage the
+breakdown into multiple sub-specs if needed.
 ```
 
 If Phase 0.3 found memory hits, append the related-context footer:
@@ -672,37 +975,42 @@ Related context (existing memory): <comma-separated entry ids>
 Consider reviewing before /flow-next:plan to avoid re-solving documented problems.
 ```
 
-If `REWRITE_TARGET` was set, the footer prefix changes:
+If `REWRITE_TARGET` was set, the footer prefix changes (the `Tracker sync:` line stays mandatory):
 
 ```text
-Spec rewritten at .flow/specs/<EPIC_ID>.md.
+Spec rewritten at .flow/specs/<SPEC_ID>.md.
+Readiness: spec rewritten — readiness reset to draft (re-bless when ready)
+Tracker sync: <same four states>
 
 Next:
-  /flow-next:plan <EPIC_ID>      → re-plan tasks (existing tasks under the epic
+  /flow-next:plan <SPEC_ID>      → re-plan tasks (existing tasks under the spec
                                     may need /flow-next:sync to align)
-  /flow-next:interview <EPIC_ID> → refine via Q&A
+  /flow-next:interview <SPEC_ID> → refine via Q&A
 ```
+
+The `Readiness:` announcement line appears ONLY when §5.3's reset actually changed the flag (`READY_RESET=true`). Never-ready specs print no readiness line — an announcement is not a confirmation prompt, and it must not claim a reset that didn't happen.
 
 ### Done when
 
-- Footer is printed.
+- End-of-run `sync check` ran (`--events capture`, `--since` = the Phase-5 run anchor, falling back to `created_at` for fresh captures); any MISSING touchpoint was retro-fired exactly once and re-checked.
+- Footer is printed with the mandatory four-state `Tracker sync:` line (explicit `n/a (bridge inactive)` when no tracker is configured).
 - Skill exits 0.
 
 ---
 
-## Manual smoke (acceptance R3, R4, R5, R6, R7, R8)
+## Manual smoke (acceptance R3, R4, R5, R6, R7, R8, R24, R25)
 
 The skill itself is markdown — there's no unit-test surface. The validation is invoking `/flow-next:capture` in a real session. Expected behavior:
 
-- Phase 0 walks `.flow/epics/`, runs memory search if memory is initialized, detects compaction, applies idempotency. Branches into duplicate-detection question if ≥2 strong matches; exits cleanly on `abort`.
+- Phase 0 walks `.flow/specs/` and the legacy `.flow/epics/` alias dir, runs memory search if memory is initialized, detects compaction, applies idempotency. Branches into duplicate-detection question if ≥2 strong matches; exits cleanly on `abort`.
 - Phase 1 emits a `## Conversation Evidence` block with verbatim user quotes (≤30 lines).
-- Phase 2 produces a draft with per-line source tags. Every acceptance criterion has one of `[user]` / `[paraphrase]` / `[inferred]`.
+- Phase 2 produces a draft with per-line source tags. Every acceptance criterion has one of `[user]` / `[paraphrase]` / `[inferred]`. Biz-context signals (R24) route to their destinations using only `[user]` / `[paraphrase]` tags; categories without conversation signal leave their destinations absent. `BIZ_SIGNAL_CATEGORIES` (0..9) computed for Phase 6.
 - Phase 3 fires must-ask cases only when (a) title is genuinely ambiguous, (b) acceptance is untestable, (c) scope-conflict persists. Optional ambiguities are deferred to Phase 4.
-- Phase 4 read-back surfaces `[inferred]` count, 8+ split note (if applicable), related-memory footer (if applicable). Interactive: user picks approve / edit / abort. Autofix: print + require `--yes`.
-- Phase 5 calls `flowctl epic create` + `epic set-plan` via heredoc.
-- Phase 6 prints the next-step footer.
+- Phase 4 read-back surfaces `[inferred]` count, 8+ split note (if applicable), related-memory footer (if applicable), glossary term-add proposals (only when `glossary list --json` reports `total_terms > 0` AND the conversation surfaced new vocabulary — Phase 2.7). Interactive: user picks approve / edit / abort; on approve with proposals, one follow-up `Glossary?` consent question; on approve with the readiness predicate met (≥1 ready spec, no `tracker.readyState`), one follow-up `Mark ready?` consent question (default keep-draft). Autofix: print + require `--yes`; proposals print as suggestions, never written; readiness never written.
+- Phase 5 calls `flowctl spec create` + `spec set-plan` via heredoc. Approved term-adds written via `flowctl glossary add` (5.8, interactive only). Consented mark-ready written via `flowctl spec ready` (5.9, interactive only). Rewrite branch (5.3) runs idempotent `spec unready` unconditionally; `READY_RESET` gates the Phase 6 announcement. With no glossary (or a husk), 2.7/4.x/5.8 are silent no-ops; with readiness un-adopted, 4.2's mark-ready question / 5.9 / all readiness footer lines are silent no-ops — zero behavior change. With `artifacts.html.enabled` true, 5.10 regenerates `.flow/artifacts/<id>/spec.html` per the disclosure reference and leaves exactly one `<!-- flow-next:artifact-link -->` line in the spec md; off/unset, 5.10 is a single config read and nothing else.
+- Phase 6 prints the next-step footer. Calls `flowctl scope suggest --signal-categories-count "$BIZ_SIGNAL_CATEGORIES"`; on exit 0 (fire), appends the R25 `/flow-next:interview --scope=business` suggestion line. R22 invariant: `BIZ_SIGNAL_CATEGORIES=0` → no-fire → no suggestion.
 
-In autofix without `--yes`, the draft prints and the skill exits 0 — no write, no epic allocated.
+In autofix without `--yes`, the draft prints and the skill exits 0 — no write, no spec allocated.
 In autofix with `--yes`, Phase 4 still prints the draft (substituting for read-back) before Phase 5 writes.
 
 The Ralph-block (SKILL.md) ensures this skill never runs under `FLOW_RALPH=1` or `REVIEW_RECEIPT_PATH` — capture requires a user at the terminal.

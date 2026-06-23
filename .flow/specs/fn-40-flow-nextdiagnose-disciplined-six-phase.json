@@ -1,0 +1,18 @@
+{
+  "branch_name": "fn-40-flow-nextdiagnose-disciplined-six-phase",
+  "completion_review_status": "ship",
+  "completion_reviewed_at": "2026-05-21T14:13:11.813899Z",
+  "created_at": "2026-05-06T21:23:54.459475Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [],
+  "id": "fn-40-flow-nextdiagnose-disciplined-six-phase",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-40-flow-nextdiagnose-disciplined-six-phase.md",
+  "status": "done",
+  "title": "/flow-next:diagnose \u2014 disciplined six-phase debugging skill",
+  "updated_at": "2026-05-21T14:13:11.975328Z"
+}

@@ -11,17 +11,20 @@ Pre-fn-30 flow-next stored memory as three flat markdown files: `.flow/memory/pi
 
 This skill IS the migration. The host agent (Claude Code / Codex / Droid) reads each legacy entry, applies the mechanical default `(track, category)` from the source filename, overrides only when the entry's content warrants, and writes a categorized entry via `flowctl memory add`. Optional autofix mode accepts every mechanical default and marks ambiguous entries as `needs-review` in the report.
 
-There is no Python classifier subprocess, no `codex`/`copilot` dispatch, no fast-model probability scoring. The host agent is already an LLM with full repo context and does the work directly. flowctl provides only thin parsing + persistence plumbing (`memory list-legacy --json`, existing `memory add`) — landed by Task 2 of this epic.
+There is no Python classifier subprocess, no `codex`/`copilot` dispatch, no fast-model probability scoring. The host agent is already an LLM with full repo context and does the work directly. flowctl provides only thin parsing + persistence plumbing (`memory list-legacy --json`, existing `memory add`) — landed by Task 2 of this spec.
 
 **Read [workflow.md](workflow.md) for the full phase-by-phase execution. Read [phases.md](phases.md) for the (track, category) decision tree with mechanical baseline + override examples.**
 
-**CRITICAL: flowctl is BUNDLED — NOT installed globally.** `which flowctl` will fail (expected). Always use:
+## Preamble
+
+**CRITICAL: flowctl is BUNDLED — NOT installed globally.** `which flowctl` will fail (expected). Define once; subsequent blocks (here and in `workflow.md`) use `$FLOWCTL`:
 
 ```bash
 FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/flowctl"
+[ -x "$FLOWCTL" ] || FLOWCTL=".flow/bin/flowctl"
 ```
 
-**Inline skill (no `context: fork`)** — `AskUserQuestion` must stay reachable across phases. Subagents can't call blocking question tools (Claude Code issues #12890, #34592). Phase 1 (Classify) needs user choice on ambiguous entries in interactive mode; Phase 4 (Cleanup) needs consent before renaming originals. (sync-codex.sh rewrites `AskUserQuestion` to `request_user_input` in the Codex mirror.)
+**Inline skill (no `context: fork`)** — `AskUserQuestion` must stay reachable across phases. Subagents can't call blocking question tools (Claude Code issues #12890, #34592). Phase 1 (Classify) needs user choice on ambiguous entries in interactive mode; Phase 4 (Cleanup) needs consent before renaming originals. (sync-codex.sh rewrites this to a plain-text numbered prompt in the Codex mirror.)
 
 ## Mode Detection
 
@@ -89,7 +92,6 @@ Same pattern as `/flow-next:plan` and `/flow-next:audit` — non-blocking notice
 if [[ -f .flow/meta.json ]]; then
   SETUP_VER=$(jq -r '.setup_version // empty' .flow/meta.json 2>/dev/null)
   PLUGIN_JSON="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.claude-plugin/plugin.json"
-  [[ -f "$PLUGIN_JSON" ]] || PLUGIN_JSON="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.factory-plugin/plugin.json"
   PLUGIN_VER=$(jq -r '.version' "$PLUGIN_JSON" 2>/dev/null || echo "unknown")
   if [[ -n "$SETUP_VER" && "$PLUGIN_VER" != "unknown" && "$SETUP_VER" != "$PLUGIN_VER" ]]; then
     echo "Plugin updated to v${PLUGIN_VER}. Run /flow-next:setup to refresh local scripts (current: v${SETUP_VER})." >&2

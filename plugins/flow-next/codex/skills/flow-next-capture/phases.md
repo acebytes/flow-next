@@ -8,12 +8,12 @@ This file is the lookup-and-calibration companion to [workflow.md](workflow.md).
 
 | Phase | Goal | Done-when |
 |-------|------|-----------|
-| **0 — Pre-flight** | Detect duplicates, compaction, idempotency conflict before drafting | Conversation keywords extracted; epic-title overlap scanned; memory cross-check (if memory initialized); compaction passed (or `--from-compacted-ok`); idempotency resolved (`REWRITE_TARGET` validated, or no prior-capture artifact, or user picked supersede/proceed) |
+| **0 — Pre-flight** | Detect duplicates, compaction, idempotency conflict before drafting | Conversation keywords extracted; spec-title overlap scanned (`.flow/specs/` + legacy `.flow/epics/`); memory cross-check (if memory initialized); compaction passed (or `--from-compacted-ok`); idempotency resolved (`REWRITE_TARGET` validated, or no prior-capture artifact, or user picked supersede/proceed) |
 | **1 — Extract conversation evidence** | Build verbatim `## Conversation Evidence` block FIRST | ≤30-line block of `> user (turn N): "..."` lines drafted; optional file-reference subagent results merged; candidate title proposed |
-| **2 — Source-tagged synthesis** | Draft spec sections with per-line tags using CLAUDE.md richer template | Every section drafted; R-IDs allocated sequentially from R1; `[inferred]` count computed; 8+ acceptance flag set if applicable; untestable criteria flagged for Phase 3 |
+| **2 — Source-tagged synthesis** | Draft spec sections with per-line tags using CLAUDE.md richer template | Every section drafted; R-IDs allocated sequentially from R1; `[inferred]` count computed; 8+ acceptance flag set if applicable; untestable criteria flagged for Phase 3; `GLOSSARY_PROPOSALS` collected (≤5; empty when glossary absent/husk — §2.7) |
 | **3 — Must-ask cases** | Resolve ambiguous-title / untestable-acceptance / scope-conflict | Interactive: user resolved each fired case; autofix: exit 2 with which case fired |
-| **4 — Read-back loop** | Show full draft + `[inferred]` tally; obtain approval | Interactive: `approve` / `consider-split` / `abort`; autofix `--yes`: payload printed; autofix without `--yes`: payload printed + exit 0 |
-| **5 — Write via flowctl** | Atomic write of new (or rewritten) epic | `.flow/specs/<id>.md` exists; `EPIC_ID` known |
+| **4 — Read-back loop** | Show full draft + `[inferred]` tally; obtain approval | Interactive: `approve` / `consider-split` / `abort`; on approve with glossary proposals, `Glossary?` consent recorded; on approve with the readiness predicate met (≥1 ready spec AND no `tracker.readyState` — §4.2), `Mark ready?` consent recorded (default keep-draft); autofix `--yes`: payload printed; autofix without `--yes`: payload printed + exit 0 (proposals print as suggestions, never written; readiness never written) |
+| **5 — Write via flowctl** | Atomic write of new (or rewritten) spec | `.flow/specs/<id>.md` exists; `SPEC_ID` known; approved term-adds written via `flowctl glossary add` (§5.8, interactive only); consented mark-ready written via `flowctl spec ready` (§5.9, interactive only); rewrite branch ran idempotent `spec unready` with `READY_RESET` recorded (§5.3); HTML render lens regenerated + link line replaced in place iff `artifacts.html.enabled` (§5.10 — off/unset is a silent no-op beyond one config read) |
 | **6 — Suggested next step** | Print footer with `/flow-next:plan` and `/flow-next:interview` hints | Footer printed; skill exits 0 |
 
 ---
@@ -26,7 +26,7 @@ The three hard-error conditions that fire in Phase 3. Interactive asks; autofix 
 
 **Trigger:** Phase 1.3 candidate title is `[inferred]` AND the conversation supports multiple plausible titles, none load-bearing.
 
-**Why hard-error:** an ambiguous title leads to bad epic ids, bad branch names, bad git history. The cost of asking is one question; the cost of guessing wrong is renaming the epic later.
+**Why hard-error:** an ambiguous title leads to bad spec ids, bad branch names, bad git history. The cost of asking is one question; the cost of guessing wrong is renaming the spec later.
 
 **Examples:**
 
@@ -39,7 +39,7 @@ The three hard-error conditions that fire in Phase 3. Interactive asks; autofix 
 - body: `Conversation supports multiple titles. Recommended: <X> — <one-sentence rationale>. Confidence: [<tier>]. (Other plausible: <Y>, <Z>.)`
 - options: `<X>`, `<Y>`, `<Z>`, `custom`
 
-**Autofix:** exit 2 with: `Must-ask (a): epic title genuinely ambiguous from conversation. Candidates: <X>, <Y>, <Z>. Re-run interactively to choose.`
+**Autofix:** exit 2 with: `Must-ask (a): spec title genuinely ambiguous from conversation. Candidates: <X>, <Y>, <Z>. Re-run interactively to choose.`
 
 ### Case (b) — Untestable acceptance
 
@@ -64,24 +64,24 @@ If user picks `clarify`, follow-up question accepts free text → re-run testabi
 
 **Autofix:** exit 2 with: `Must-ask (b): <N> criteria failed testability check: <list>. Re-run interactively to reword or drop.`
 
-### Case (c) — Scope-conflict with existing epic
+### Case (c) — Scope-conflict with existing spec
 
-**Trigger:** Phase 0.5 went `supersede` or `proceed-anyway` (user accepted a duplicate-ish epic), AND the new epic's drafted scope (Phase 2) still substantively overlaps the existing epic's scope on a load-bearing axis (same module + same problem domain, even if framed differently).
+**Trigger:** Phase 0.5 went `supersede` or `proceed-anyway` (user accepted a duplicate-ish spec), AND the new spec's drafted scope (Phase 2) still substantively overlaps the existing spec's scope on a load-bearing axis (same module + same problem domain, even if framed differently).
 
-**Why hard-error:** if the new epic is "in addition to" the old one, the boundaries between them must be explicit. Otherwise the next time someone runs `/flow-next:plan`, both epics fight over the same tasks.
+**Why hard-error:** if the new spec is "in addition to" the old one, the boundaries between them must be explicit. Otherwise the next time someone runs `/flow-next:plan`, both specs fight over the same tasks.
 
 **Examples:**
 
-- Old epic: `OAuth callback rate limiter` (in progress, 2 tasks done). New conversation: "we need rate limiting on the API". User picks `proceed-anyway`. New scope drafted as "all API endpoints" — explicit superset of old. → must-ask: how do the two epics carve up the rate-limit space?
-- Old epic: `OAuth callback rate limiter`. New conversation: "we need rate limiting on the GraphQL endpoint". New scope: GraphQL only. → no must-ask. Boundaries are clear.
+- Old spec: `OAuth callback rate limiter` (in progress, 2 tasks done). New conversation: "we need rate limiting on the API". User picks `proceed-anyway`. New scope drafted as "all API endpoints" — explicit superset of old. → must-ask: how do the two specs carve up the rate-limit space?
+- Old spec: `OAuth callback rate limiter`. New conversation: "we need rate limiting on the GraphQL endpoint". New scope: GraphQL only. → no must-ask. Boundaries are clear.
 
 **Interactive question shape:**
 
 - header: `Boundary?`
-- body: `Old epic <id> "<title>" overlaps new epic on <axis>. Recommended: <X> (carve out <bound>) — <rationale>. Confidence: [<tier>].`
+- body: `Old spec <id> "<title>" overlaps new spec on <axis>. Recommended: <X> (carve out <bound>) — <rationale>. Confidence: [<tier>].`
 - options: `carve-by-module`, `carve-by-feature`, `mark-old-as-subsumed`, `keep-overlap-and-let-plan-resolve`
 
-**Autofix:** exit 2 with: `Must-ask (c): scope conflict with existing epic <id>. Re-run interactively to disambiguate.`
+**Autofix:** exit 2 with: `Must-ask (c): scope conflict with existing spec <id>. Re-run interactively to disambiguate.`
 
 ---
 
@@ -95,6 +95,33 @@ Every acceptance criterion line, every decision-context line, every scope-boundi
 | `[paraphrase]` | User intent restated in spec language (semantic equivalence; no new constraints introduced) | The user expressed this idea, but agent rephrased to match spec conventions. Same content, cleaner wording. |
 | `[inferred]` | Agent fill-in (most-scrutinized; user must confirm at read-back) | Agent decided this; user did not state it explicitly. May be a reasonable default, may be wrong. |
 | `[strategy:<track>]` | Derived from `STRATEGY.md` content (verbatim or near-verbatim quote of approach / track body) | The criterion follows directly from a populated section in `STRATEGY.md` — the track name appears literal in the tag. Activates only when Phase 0 strategy snapshot is present. |
+
+### Biz-context signal routing (R24)
+
+Section names referenced below are anchors in the canonical template at [`plugins/flow-next/templates/spec.md`](../../templates/spec.md) (per R17 — never re-embed the section list inline). At runtime the template is resolved via the 4-tier discovery cascade (first match wins): `<repo_root>/SPEC.md` → `<repo_root>/spec.md` → `.flow/templates/spec.md` → bundled `${PLUGIN_ROOT}/templates/spec.md`. Capture routes **explicit** conversation signals — only `[user]` or `[paraphrase]` source tags — across the nine SIGNAL CATEGORIES (the R24/R25 counting unit) onto a smaller set of markdown destinations:
+
+| # | Signal category | Routing destination(s) | Trigger phrasing in conversation |
+|---|-----------------|------------------------|-----------------------------------|
+| 1 | Target user / persona | `Goal & Context` | "for X users", "the operator does Y", "junior devs need…" |
+| 2 | Problem framing / why-now | `Goal & Context` | "the pain is X", "this came up because Y", "we need this because…" |
+| 3 | Success metrics / definition of done | outcome-AC (`Acceptance Criteria`) **and** `## Decision Context > ### Motivation` | "we win if X", "good enough means Y", "the metric is…" |
+| 4 | MVP scope / "not doing X yet" | `Boundaries` | "MVP is just X", "not Y yet", "ship narrow first" |
+| 5 | Business constraints (regulatory, deadlines, budget) | `Goal & Context` OR `## Decision Context > ### Motivation` (pick whichever is most coherent in context — usually `Goal & Context` for context-setting constraints; `Motivation` when the constraint is the reason for the trade-off) | "GDPR requires", "deadline is Q3", "no infra spend", "EU-resident-only" |
+| 6 | What NOT to build / non-goals | `Boundaries` | "definitely NOT X", "out of scope", "don't want Y" |
+| 7 | Prioritization rationale | `## Decision Context > ### Motivation` | "more important than X", "we'd rather Y over Z", "speed beats robustness here" |
+| 8 | Business risks | `Goal & Context` OR `## Decision Context > ### Motivation` (same disambiguation as constraints) | "if this leaks we lose X", "reputational damage", "can't roll back" |
+| 9 | UX expectations | `Goal & Context` | "errors should be friendly", "loading must feel instant", "accessibility floor" |
+
+Rules:
+
+- **Source tags are restricted to `[user]` or `[paraphrase]`** for biz-routed content. `[inferred]` content does NOT route into business sections — capture never fabricates business context. If the conversation provides no signal for a destination, that destination stays absent (no empty-section auto-populate).
+- **One signal can produce multiple destination lines** — e.g., a success metric becomes both an outcome-AC R-ID and a `### Motivation` rationale entry. That still counts as **one** signal category for the R25 sparse-suggestion threshold (the count is over R24's nine categories, not over markdown destinations).
+- **Categories 1, 2, 9 (target user / problem framing / UX) collapse into `Goal & Context` prose.** Per-line tags inside the narrative are not required, but the section-level tag breakdown (e.g., `<!-- Goal & Context: 80% [user], 20% [paraphrase] -->`) must reflect them.
+- **Category 4 ("MVP scope / not doing X yet") and Category 6 ("what NOT to build") both route to `Boundaries`** but stay counted separately for R25 (different signal-source patterns: "MVP is narrow" vs "definitely not X").
+- **Categories 5 and 8 (constraints / risks) each pick exactly one destination** (`Goal & Context` OR `Motivation`) per signal. Don't double-route to both — pick the one that fits the framing of the user's phrasing.
+- **`## Decision Context` may be FLAT or SUBSTRUCTURED** (per the canonical template at `plugins/flow-next/templates/spec.md`; resolved at runtime via the discovery cascade above). When capture routes content to `### Motivation`, the section MUST be SUBSTRUCTURED (write `### Motivation` and, if no FLAT body existed previously, leave `### Implementation Tradeoffs` empty for a later technical pass — do NOT write an `*Pending technical-scope interview pass.*` placeholder; that's `/flow-next:interview --scope=business`'s job, not capture's). When there are zero biz signals across categories 3, 5, 7, 8 (all the categories that could land in `Motivation`), the section stays FLAT — capture never promotes FLAT → substructured for purely-tech-flavoured conversations (R22 invariant).
+
+Worked routing examples in [workflow.md §2.6](workflow.md). The signal-category count produced here is the `BIZ_SIGNAL_CATEGORIES` value Phase 6 passes to `flowctl scope suggest` for the R25 fire/no-fire decision.
 
 ### Examples
 
@@ -139,7 +166,7 @@ Used in Phase 3 (must-ask) and Phase 4 (read-back) recommendation bodies. The bo
 | Tier | When to use | Example body |
 |------|-------------|--------------|
 | `[high]` | Agent has strong codebase signal or convention match; recommendation is load-bearing | `Recommended: extend fn-12-oauth-callback — strong title overlap (3 strong matches) + same module. Confidence: [high].` |
-| `[judgment-call]` | Slight lean but reasonable people disagree; user's call carries weight | `Recommended: proceed-anyway — overlap is moderate (2 matches), epics may legitimately co-exist. Confidence: [judgment-call].` |
+| `[judgment-call]` | Slight lean but reasonable people disagree; user's call carries weight | `Recommended: proceed-anyway — overlap is moderate (2 matches), specs may legitimately co-exist. Confidence: [judgment-call].` |
 | `[your-call]` | Agent has no signal; user's domain knowledge / priority / preference decides | `Recommended: <none> — I don't have enough context to recommend. Pick what fits your priority. Confidence: [your-call].` |
 
 The `[your-call]` tier exists deliberately. Always recommending trains users to defer; sometimes the honest answer is "I don't know — you pick". Don't hide that under `[judgment-call]`.
@@ -153,7 +180,7 @@ The `[your-call]` tier exists deliberately. Always recommending trains users to 
 ### What the recommendation IS NOT
 
 - It is not a vote.
-- It is not a binding default that fires if the user doesn't reply within a timeout (capture has no timeout — `request_user_input` is blocking).
+- It is not a binding default that fires if the user doesn't reply within a timeout (capture has no timeout — `plain-text numbered prompt` is blocking).
 - It is not a marker that should appear ON the option label (anchoring research: F2.1).
 
 ---
@@ -167,11 +194,13 @@ The full list lives in [SKILL.md](SKILL.md). Quick reference:
 | Tech-stack mentions the user did not state | Capture writes intent; `/flow-next:plan` writes implementation. Spec-kit convention. |
 | Inventing acceptance criteria not in conversation | Source-tagging exists to make this visible. Pure `[inferred]` acceptance must surface at read-back for explicit user confirmation. |
 | Code snippets / specific file paths in spec body | Those belong in `/flow-next:plan` task specs after research lands. Capture's output is high-level. |
-| Silent overwrite of existing epic | Idempotency requires `--rewrite <id>`. Without it, Phase 0 conflict-detection branches into extend / supersede / proceed-anyway. |
-| Auto-splitting an 8+ acceptance epic | Phase 4 surfaces the option; the user decides. Capture never auto-actions a split. |
+| Silent overwrite of existing spec | Idempotency requires `--rewrite <id>`. Without it, Phase 0 conflict-detection branches into extend / supersede / proceed-anyway. |
+| Auto-splitting an 8+ acceptance spec | Phase 4 surfaces the option; the user decides. Capture never auto-actions a split. |
 | Setting `context: fork` | Blocking-question tools must stay reachable. |
-| Calling `flowctl epic create` before Phase 4 approval | Phase 5 is the only write phase. |
-| `git add -A` from this skill | Stage only `.flow/epics/<id>.json` + `.flow/specs/<id>.md` (and `.flow/meta.json` if mutated). Capture does NOT commit by default — user owns staging. |
+| Calling `flowctl spec create` before Phase 4 approval | Phase 5 is the only write phase. |
+| Glossary term-adds without read-back consent, or in autofix | Consent lives in Phase 4.2's `Glossary?` question; autofix prints suggestions only. Husk-aware gate (`total_terms > 0`) — seeding an empty glossary is `/flow-next:prime`'s job. |
+| Marking a spec ready without consent, in autofix, or outside the visibility predicate | Consent lives in Phase 4.2's `Mark ready?` question (shown only when readiness is adopted AND no `tracker.readyState`); the write is Phase 5.9, interactive-only. Readiness is the human's gate — capture never infers it. Autofix prints the footer suggestion only. |
+| `git add -A` from this skill | Stage only the JSON sidecar (`.flow/specs/<id>.json` post-1.0; `.flow/epics/<id>.json` on alias-mode 0.x repos) + `.flow/specs/<id>.md` (and `.flow/meta.json` if mutated). Capture does NOT commit by default — user owns staging. |
 
 ---
 
@@ -186,7 +215,7 @@ Compaction detected without --from-compacted-ok?
  yes → refuse with overrides hint (interactive); exit 2 (autofix)
  no → continue
 
-Duplicate detection: ≥2 strong epic-title matches AND --rewrite not set?
+Duplicate detection: ≥2 strong spec-title matches AND --rewrite not set?
  yes → ask: extend / supersede / proceed-anyway / abort (interactive); exit 2 (autofix)
  no → continue
 
@@ -209,9 +238,13 @@ Read-back: show full draft + [inferred] tally + 8+ note + diff (if rewrite).
  autofix --yes: print and proceed
  autofix without --yes: print and exit 0
 
-Approved? Write via flowctl epic create + epic set-plan.
+Approved? Write via flowctl spec create + spec set-plan.
+
+Glossary proposals approved at read-back? (interactive only; gate: total_terms > 0)
+ yes → write each via flowctl glossary add (best-effort, never blocks)
+ no → continue
 
 Print next-step footer. Done.
 ```
 
-In autofix mode, every "ask" branch becomes "exit 2". Capture cannot guess on must-ask cases.
+In autofix mode, every "ask" branch becomes "exit 2". Capture cannot guess on must-ask cases. Glossary term-adds are never written in autofix — proposals print as suggestions only.

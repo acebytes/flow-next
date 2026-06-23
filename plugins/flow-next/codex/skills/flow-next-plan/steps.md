@@ -9,7 +9,7 @@
 
 **STOP** and instead:
 - create/update tasks in `.flow/` using `flowctl`,
-- record details in the epic/task spec markdown.
+- record details in the spec/task markdown.
 
 ## Success criteria
 
@@ -60,20 +60,57 @@ List expected files in each task's `**Files:**` field. If multiple tasks must to
 
 ## Step 0: Initialize .flow
 
-**CRITICAL: flowctl is BUNDLED — NOT installed globally.** `which flowctl` will fail (expected). Always use:
-
 ```bash
-# Get flowctl path
-FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$HOME/.codex}}/scripts/flowctl"
-[ -x "$FLOWCTL" ] || FLOWCTL=".flow/bin/flowctl"
-
-# Ensure .flow exists
+# Ensure .flow exists (FLOWCTL defined once in SKILL.md preamble)
 $FLOWCTL init --json
 ```
 
 ## Step 1: Fast research (parallel)
 
 **If input is a Flow ID** (fn-N-slug or fn-N-slug.M, including legacy fn-N/fn-N-xxx): First fetch it with `$FLOWCTL show <id> --json` and `$FLOWCTL cat <id>` to get the request context.
+
+**Handle-recognition rule (R16):** do NOT gate the Flow-ID branch on a hard "must start with `fn-`" check. Before treating a single-token arg as a freeform idea, route it through `$FLOWCTL show <arg> --json` — flowctl's widened resolver (fn-52.10) maps a tracker key (`wor-17` / `wor-17.M`) to its linked spec/task. If it resolves (rc 0), use the canonical id from the JSON and take the existing-Flow-ID path (Route A in Step 5); only a non-resolving token becomes a new idea (Route B). So `plan wor-17` refines the linked spec, never creating a duplicate.
+
+**Readiness soft-check (adoption-gated; warn-not-block; fn-58):** runs right after the spec resolves and BEFORE the scout fan-out (warn before spending research tokens on a half-baked spec). Applies ONLY when the input resolved to an existing SPEC (Route A, canonical id without a `.M` suffix) — task ids and freeform ideas (Route B) skip this entirely.
+
+```bash
+SHOW_JSON=$($FLOWCTL show <id> --json) # `ready` is an explicit boolean (fn-58.1)
+SPEC_READY=$(jq -r '.ready // false' <<< "$SHOW_JSON")
+
+READINESS_WARN=false
+if [[ "$SPEC_READY" != "true" ]]; then
+ # Adoption gate (husk-vs-presence pattern, like the STRATEGY guard below): fire only
+ # when readiness is in use — any spec marked ready OR tracker.readyState configured.
+ # Probe failures degrade to "not adopted" → silence (non-adopters never see this).
+ READY_STATE=$($FLOWCTL config get tracker.readyState --json 2>/dev/null | jq -r '.value // empty')
+ READY_ADOPTED=$($FLOWCTL specs --json 2>/dev/null | jq '[.specs[] | select(.ready == true)] | length' 2>/dev/null || echo 0)
+ if [[ -n "$READY_STATE" || "$READY_ADOPTED" -ge 1 ]]; then
+ READINESS_WARN=true
+ fi
+fi
+```
+
+When `READINESS_WARN=false`: continue silently — zero behavior change for ready specs and for repos that never adopted readiness.
+
+When `READINESS_WARN=true`:
+
+- **Non-interactive / Ralph / autonomous** (any non-interactive marker: `FLOW_RALPH=1`, `REVIEW_RECEIPT_PATH` set, `FLOW_AUTONOMOUS=1`, or the `mode:autonomous` token parsed in SKILL.md — treat the marker *family* as the gate, not a rigid two-var list): auto-proceed with ONE stderr line, never block:
+ ```bash
+ echo "[READINESS]: spec <id> not marked ready — proceeding (non-interactive)" >&2
+ ```
+- **Interactive**: ask ONE question (MUST ask via the plain-text numbered prompt described below; lead with recommendation; default proceed — planning is non-destructive and often part of getting a spec ready). The option set splits by tracker mode:
+
+**Ask the user via plain text.** Render the options below as a numbered list `1.` … `N.`, followed by a final option `N+1. Other — type your own answer`. Print the question, then the numbered list, then **stop and wait for the user's next message before continuing**. Parse the reply as: a bare number `1`–`N+1` → that option; the literal text of an option label → that option; free text after `Other` → custom answer.
+ - **`tracker.readyState` NOT configured** (local readiness):
+ - **header**: `Spec not ready`
+ - **body**: `<spec-id> is not marked ready (readiness is in use in this repo). Recommended: proceed — planning is non-destructive and refining a draft is normal. Confidence: [high].`
+ - **options** (frozen): `proceed` (default — continue to research), `mark-ready-then-proceed` (run `$FLOWCTL spec ready <id> --json`, then continue), `abort` (exit 0 — no spec or task changes made; re-run /flow-next:plan once the spec is blessed)
+ - **`tracker.readyState` configured** (tracker-authoritative readiness — one-way pull; NEVER offer local mark-ready, the next sync would silently revert it):
+ - **header**: `Spec not ready`
+ - **body**: `<spec-id> is not marked ready; readiness projects from the tracker (state: <readyState>). Recommended: proceed — planning is non-destructive. Confidence: [high].`
+ - **options** (frozen): `proceed` (default — continue to research), `abort` (exit 0 — no spec or task changes made), `update-tracker-state-then-rerun` (exit 0 with guidance: move the linked issue to "<readyState>" on the board, pull via /flow-next:tracker-sync, re-run /flow-next:plan)
+
+Never a hard block — `abort` / `update-tracker-state-then-rerun` are user choices, not skill-imposed stops (R6).
 
 **Check if memory and github-scout are enabled:**
 ```bash
@@ -119,7 +156,7 @@ Run ALL of these scouts in parallel:
 | the `docs_scout` agent | External documentation | YES |
 | the `github_scout` agent | Cross-repo patterns via gh CLI | IF scouts.github |
 | the `memory_scout` agent | Project memory entries | IF memory.enabled |
-| the `epic_scout` agent | Dependencies on open epics | YES |
+| the `spec_scout` agent | Dependencies on open specs | YES |
 | the `docs_gap_scout` agent | Docs needing updates | YES |
 
 **If user chose repo-scout (default/faster)** OR rp-cli unavailable:
@@ -132,7 +169,7 @@ Run ALL of these scouts in parallel:
 | the `docs_scout` agent | External documentation | YES |
 | the `github_scout` agent | Cross-repo patterns via gh CLI | IF scouts.github |
 | the `memory_scout` agent | Project memory entries | IF memory.enabled |
-| the `epic_scout` agent | Dependencies on open epics | YES |
+| the `spec_scout` agent | Dependencies on open specs | YES |
 | the `docs_gap_scout` agent | Docs needing updates | YES |
 
 **Anti-pattern**: Running only 2-3 scouts "because they seem most relevant" — this causes incomplete plans.
@@ -144,7 +181,7 @@ Must capture:
 - External docs links
 - Project conventions (CLAUDE.md, CONTRIBUTING, etc)
 - Architecture patterns and data flow (especially with context-scout)
-- Epic dependencies (from epic-scout)
+- Spec dependencies (from spec-scout)
 - Doc updates needed (from docs-gap-scout) - add to task acceptance criteria
 - DESIGN.md design system tokens (if repo-scout found one)
 
@@ -197,10 +234,10 @@ Default to standard unless complexity demands more or less.
 
 **Route A - Input was an existing Flow ID**:
 
-1. If epic ID (fn-N-slug or legacy fn-N/fn-N-xxx):
+1. If spec ID (fn-N-slug or legacy fn-N/fn-N-xxx):
  ```bash
  # Use stdin heredoc (no temp file needed)
- $FLOWCTL epic set-plan <id> --file - --json <<'EOF'
+ $FLOWCTL spec set-plan <id> --file - --json <<'EOF'
  <plan content here>
  EOF
  ```
@@ -215,28 +252,31 @@ Default to standard unless complexity demands more or less.
 
 **Route B - Input was text (new idea)**:
 
-1. Create epic:
+1. Create spec:
  ```bash
- $FLOWCTL epic create --title "<Short title>" --json
+ $FLOWCTL spec create --title "<Short title>" --json
  ```
- This returns the epic ID (e.g., fn-1-add-oauth).
+ This returns the spec ID (e.g., fn-1-add-oauth).
 
-2. Set epic branch_name (deterministic):
- - Default: use epic ID (e.g., fn-1-add-oauth)
+2. Set spec branch_name (deterministic):
+ - Default: use spec ID (e.g., fn-1-add-oauth)
  ```bash
- $FLOWCTL epic set-branch <epic-id> --branch "<epic-id>" --json
+ $FLOWCTL spec set-branch <spec-id> --branch "<spec-id>" --json
  ```
  - If user specified a branch, use that instead.
 
-3. Write epic spec (use stdin heredoc):
+3. Write spec (use stdin heredoc):
+
+ The canonical scaffold lives in [`plugins/flow-next/templates/spec.md`](../../templates/spec.md) — section list, scope-owner annotations, and the `## Decision Context` flat-vs-H3 conditional. At runtime the template is resolved via the 4-tier discovery cascade (first match wins): `<repo_root>/SPEC.md` → `<repo_root>/spec.md` → `.flow/templates/spec.md` → bundled `${PLUGIN_ROOT}/templates/spec.md`. The bundled file is the canonical source of truth; earlier tiers are user-customized overrides. Read the resolved template before authoring; never duplicate its section list inline. The plan skill extends that scaffold with the plan-specific sections shown below (Overview, Quick commands, Strategy Alignment, Strategy drift, Early proof point, Requirement coverage).
+
  ```bash
- # Include: Overview, Scope, Approach, Quick commands (REQUIRED), Acceptance,
- # Early proof point, Requirement coverage, References
+ # Include: Overview, Scope, Approach, Quick commands (REQUIRED),
+ # Acceptance Criteria, Early proof point, Requirement coverage, References
  # Conditional sections: ## Strategy Alignment (when STRATEGY_PRESENT=true from Step 1),
  # ## Strategy drift flagged for review (when plan scope conflicts with an active track)
  # Add mermaid diagram if data model or architecture changes
- $FLOWCTL epic set-plan <epic-id> --file - --json <<'EOF'
- # Epic Title
+ $FLOWCTL spec set-plan <spec-id> --file - --json <<'EOF'
+ # Spec Title
 
  ## Overview
  ...
@@ -247,7 +287,7 @@ Default to standard unless complexity demands more or less.
  ```
 
  ## Boundaries / non-goals
- - <what this epic explicitly does NOT cover>
+ - <what this spec explicitly does NOT cover>
 
  ## Strategy Alignment
  <!-- Include this section ONLY when STRATEGY_PRESENT=true from Step 1.
@@ -272,7 +312,7 @@ Default to standard unless complexity demands more or less.
  ## Decision context
  - <why this approach over alternatives>
 
- ## Acceptance
+ ## Acceptance Criteria
  - **R1:** <testable criterion>
  - **R2:** <testable criterion>
  - **R3:** <testable criterion>
@@ -285,7 +325,7 @@ Default to standard unless complexity demands more or less.
 
  | Req | Description | Task(s) | Gap justification |
  |-----|-------------|---------|-------------------|
- | R1 | <criterion from Acceptance> | fn-N-slug.1, fn-N-slug.2 | — |
+ | R1 | <criterion from Acceptance Criteria> | fn-N-slug.1, fn-N-slug.2 | — |
  | R2 | <another criterion> | fn-N-slug.3 | — |
  | R3 | <deferred item> | — | Deferred to fn-M-slug |
  EOF
@@ -310,29 +350,29 @@ Default to standard unless complexity demands more or less.
  - Usually the first task in dependency order, but not always
 
  **Requirement coverage rules:**
- - One row per acceptance criterion or distinct requirement from the epic spec
+ - One row per acceptance criterion or distinct requirement from the spec
  - Every requirement must map to at least one task OR have a gap justification
- - Table goes at the bottom of the epic spec (after Acceptance + Early proof point)
- - Keep Req IDs simple (R1, R2...) — they're local to this epic
+ - Table goes at the bottom of the spec (after Acceptance Criteria + Early proof point)
+ - Keep Req IDs simple (R1, R2...) — they're local to this spec
 
- **R-ID rule (MANDATORY for new epic specs):**
+ **R-ID rule (MANDATORY for new specs):**
  - Number acceptance criteria as `R1`, `R2`, `R3`, ... in creation order using the `- **Rn:** ...` prose prefix format shown in the template above.
  - Once a review cycle has run against an R-ID, **never renumber**. Reordering is fine (R1, R3, R5 after R2/R4 deletion is correct).
  - New criteria take the next unused number. Gaps are fine — do not compact.
- - R-IDs in `## Acceptance` and `## Requirement coverage` must match (same IDs, same meanings).
+ - R-IDs in `## Acceptance Criteria` and `## Requirement coverage` must match (same IDs, same meanings).
  - R-IDs are plain markdown prose, not YAML — the reviewer matches them via LLM reasoning, not strict parsing.
 
-4. Set epic dependencies (from epic-scout findings):
+4. Set spec dependencies (from spec-scout findings):
 
- If epic-scout found dependencies, set them automatically:
+ If spec-scout found dependencies, set them automatically:
  ```bash
- # For each dependency found by epic-scout:
- $FLOWCTL epic add-dep <new-epic-id> <dependency-epic-id> --json
+ # For each dependency found by spec-scout:
+ $FLOWCTL spec add-dep <new-spec-id> <dependency-spec-id> --json
  ```
 
  Report findings at end of planning (no user prompt needed):
  ```
- Epic dependencies set:
+ Spec dependencies set:
  - fn-N-slug → fn-2-add-auth (Auth): Uses authService from fn-2-add-auth.1
  - fn-N-slug → fn-5-user-model (DB): Extends User model
  ```
@@ -340,10 +380,10 @@ Default to standard unless complexity demands more or less.
 5. Create child tasks:
  ```bash
  # Task with no dependencies:
- $FLOWCTL task create --epic <epic-id> --title "<Task title>" --json
+ $FLOWCTL task create --spec <spec-id> --title "<Task title>" --json
 
  # Task with dependencies (use --deps for inline dependency declaration):
- $FLOWCTL task create --epic <epic-id> --title "<Task title>" --deps <dep1>,<dep2> --json
+ $FLOWCTL task create --spec <spec-id> --title "<Task title>" --deps <dep1>,<dep2> --json
  ```
 
  **TIP**: Use `--deps` to declare dependencies inline when creating tasks. Tasks must exist before being referenced, so create in dependency order.
@@ -428,14 +468,14 @@ Default to standard unless complexity demands more or less.
  - Targets come from repo-scout/context-scout findings in Step 1
 
  **`satisfies` frontmatter rules (optional, additive):**
- - Populate `satisfies: [R1, R3]` only when the task obviously advances specific R-IDs from the epic's `## Acceptance` section.
+ - Populate `satisfies: [R1, R3]` only when the task obviously advances specific R-IDs from the spec's `## Acceptance Criteria` section.
  - Tasks that do infrastructure, refactoring, shared plumbing, or docs-only work may legitimately have **no** `satisfies` entry — omit the frontmatter entirely.
  - Use bare R-ID tokens (`[R1, R3]`), not quoted strings.
  - Frontmatter is additive — tasks created without it parse unchanged.
 
 7. Add task dependencies (if not already set via `--deps`):
 
- **Preferred**: Use `--deps` flag during task creation (step 5). This saves tool calls.
+ **Preferred**: Use `--deps` flag during task creation (step 5). This saves prompt turns.
 
  **Alternative**: Use `dep add` to add dependencies after task creation:
  ```bash
@@ -448,27 +488,46 @@ Default to standard unless complexity demands more or less.
 
 8. Output current state:
  ```bash
- $FLOWCTL show <epic-id> --json
- $FLOWCTL cat <epic-id>
+ $FLOWCTL show <spec-id> --json
+ $FLOWCTL cat <spec-id>
  ```
 
 ## Step 6: Validate
 
 ```bash
-$FLOWCTL validate --epic <epic-id> --json
+$FLOWCTL validate --spec <spec-id> --json
 ```
 
 Fix any errors before proceeding.
 
+## Step 6.5: Tracker sync (opt-in) — NO sub-issues; optional body checklist only
+
+**Optional. Runs only when the tracker bridge is active AND `plan` is opted in. With no tracker configured this is a no-op — planning behaves exactly as today.** When opted in, planning projects the spec to the tracker issue. **If the spec is not yet linked (e.g. you started straight from `/flow-next:plan`, no `/flow-next:capture`), the tracker-sync skill flow-first-pushes — it creates the issue + links it — then reconciles** (tracker-sync §Phase 3 "create-if-unlinked"); an active bridge therefore never silently leaves a planned spec untracked. Planning **never auto-creates tracker sub-issues per task** — tasks stay flow-local (R3, Grain); the spec ↔ one-issue grain holds. The only optional task-level effect is rendering the task list as a **checklist inside the issue body** (off by default; a body-format concern owned by the merge engine).
+
+```bash
+if [ "$($FLOWCTL sync active --json | jq -r '.active')" = "true" ] \
+ && [ "$($FLOWCTL config get tracker.perEvent.plan --json | jq -r '.value')" != "off" ] \
+ && [ "$($FLOWCTL config get tracker.perEvent.plan --json | jq -r '.value')" != "null" ]; then
+ # Invoke the flow-next-tracker-sync skill to push/reconcile the spec body
+ # (which MAY render the task list as a body checklist — never sub-issues).
+ # skill: flow-next-tracker-sync (operation: <leaf> <spec-id>)
+ # Unlinked spec → flow-first push (create + link) first, then reconcile
+ # (tracker-sync §Phase 3 create-if-unlinked). No-op only if no transport reachable.
+ :
+fi
+```
+
+**Never** create one tracker issue per task. The grain is one spec ↔ one issue; tasks are flow-local. Best-effort — a tracker failure never blocks planning.
+
 ## Step 7: Review (if chosen at start)
 
 If user chose "Yes" to review in SKILL.md setup question:
-1. Invoke `/flow-next:plan-review` with the epic ID
+1. Invoke `/flow-next:plan-review` with the spec ID
 2. If review returns "Needs Work" or "Major Rethink":
  - **Re-anchor EVERY iteration** (do not skip):
  ```bash
- $FLOWCTL show <epic-id> --json
- $FLOWCTL cat <epic-id>
+ $FLOWCTL show <spec-id> --json
+ $FLOWCTL cat <spec-id>
  ```
  - **Immediately fix the issues** (do NOT ask for confirmation — user already consented)
  - Re-run `/flow-next:plan-review`
@@ -480,10 +539,10 @@ If user chose "Yes" to review in SKILL.md setup question:
 
 ## Step 8: Offer next steps
 
-Show epic summary with size breakdown and offer options:
+Show spec summary with size breakdown and offer options:
 
 ```
-Epic fn-N-slug created: "<title>"
+Spec fn-N-slug created: "<title>"
 Tasks: M total | Sizes: Ns S, Nm M
 
 Next steps:
@@ -499,3 +558,62 @@ If user selects 4 or 5:
 - **Simplify**: Remove non-essential sections, tighten acceptance criteria, merge small tasks
 
 Loop back to options after changes until user selects 1, 2, or 3.
+
+**On loop exit (user picked 1, 2, or 3):** run Step 8.5 BEFORE dispatching the chosen next step or finishing — never on first arrival at this menu. Options 4/5 mutate tasks; generating earlier would render a lens the user is still editing.
+
+Under `AUTONOMOUS=1` there is no options menu — run Step 8.5 directly after Step 6/7 complete.
+
+## Step 8.5: HTML render lens (opt-in) — regenerate the spec artifact with the plan layer
+
+**Gated on `artifacts.html.enabled` — this check is the ONLY addition when the mode is off.**
+
+```bash
+HTML_LENS=$($FLOWCTL config get artifacts.html.enabled --json | jq -r 'if .value == true then "true" else "false" end')
+```
+
+When `HTML_LENS != true` (off or unset): **skip this entire step.** Load no reference file, write no artifact, open no session, print no artifact-related output — the gate read above is the only cost.
+
+When `HTML_LENS = true`:
+
+1. **Load the disclosure reference** [`plugins/flow-next/references/html-artifacts.md`](../../references/html-artifacts.md) (relative cross-link — resolves from this skill dir in every install layout, same shape as the spec-template link). It owns ALL design and generation rules — hard rules, design contract, spec-lens content, DAG discipline, Lavish flow, pre-publish checklist. Never duplicate its rules here; follow it top to bottom.
+2. **Regenerate the artifact** at the SAME fixed path capture uses (reference §1.3) — one pathway, state-dependent (reference §4): tasks now exist, so the lens renders the plan layer too (task dependency DAG with critical path, R-ID → task coverage matrix, plan dials).
+
+ ```bash
+ mkdir -p ".flow/artifacts/<spec-id>"
+ # Host agent regenerates .flow/artifacts/<spec-id>/spec.html per the reference.
+ ```
+3. **Late-mutation rule:** if anything after this generation mutates tasks in the same plan session (e.g. the chosen option 3's `/flow-next:plan-review` fix loop, or the user re-opening go-deeper/simplify), regenerate before the final output — same path, never a second file.
+4. **Update the artifact link line in the spec markdown** per reference §1.4: replace the `<!-- flow-next:artifact-link -->` marker line in place (capture usually wrote it; insert once after the H1 if absent). Link target follows ignore status (reference §4):
+
+ ```bash
+ if git check-ignore --no-index -q ".flow/artifacts/<spec-id>/spec.html"; then
+ LINK_MODE=local # file ignored (dir, glob, or exact-path rule) → local-open guidance, never a blob link that 404s
+ # --no-index: an already-tracked artifact still honors a later ignore rule
+ else
+ LINK_MODE=repo # tracked → repo-relative link
+ fi
+ # Idempotency check — exactly one marker line after EVERY run. Non-fatal
+ # (best-effort contract below): warn and continue, never abort planning.
+ MARKER_COUNT=$(grep -c 'flow-next:artifact-link' ".flow/specs/<spec-id>.md" || true)
+ if [ "${MARKER_COUNT:-0}" -ne 1 ]; then
+ echo "warn: artifact link line check failed (${MARKER_COUNT:-0} markers in .flow/specs/<spec-id>.md) — link needs manual fix" >&2
+ fi
+ ```
+5. **Run the reference's pre-publish checklist (§8)**, including the self-containment self-check grep (§2) — it must print `OK: self-contained` before the output may claim the artifact.
+6. **Lavish session — interactive runs only** (reference §7). The guard is in the snippet, not just prose — open and poll sit INSIDE it:
+
+ ```bash
+ LAVISH_OK=true
+ [[ "${AUTONOMOUS:-0}" == "1" || -n "${FLOW_AUTONOMOUS:-}" || -n "${FLOW_RALPH:-}" || -n "${REVIEW_RECEIPT_PATH:-}" ]] && LAVISH_OK=false
+ if [[ "$LAVISH_OK" == "true" ]] && command -v lavish-axi >/dev/null 2>&1; then
+ lavish-axi "$(pwd)/.flow/artifacts/<spec-id>/spec.html" # absolute path — sessions key on it
+ # ...then poll for feedback in the background via `lavish-axi poll` — ONLY inside this guard
+ fi
+ ```
+
+ Each drained annotation maps to an edit of the spec/task markdown (never the HTML), then the lens regenerates at the same path. `lavish-axi` absent → plain artifact, zero mention of Lavish, never an error.
+
+ **Non-interactive runs generate only** (any non-interactive marker: `AUTONOMOUS=1`, `FLOW_AUTONOMOUS=1`, `FLOW_RALPH=1`, `REVIEW_RECEIPT_PATH` set — treat the marker *family* as the gate, not a rigid var list; a marker the family implies but the snippet misses still means `LAVISH_OK=false`): never open a session, never poll; at most one stderr line noting pending prompts.
+7. **Name the artifact in the final output:** append `Artifact: .flow/artifacts/<spec-id>/spec.html (render lens — regenerable; markdown is the record)` to the plan summary. Omit entirely when the mode is off/unset.
+
+Best-effort: artifact generation failure is non-fatal — skip the link-line update, print one stderr note, never block planning (the plan is already on disk; markdown is the record).

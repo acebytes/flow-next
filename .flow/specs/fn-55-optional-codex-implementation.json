@@ -1,0 +1,28 @@
+{
+  "branch_name": "fn-55-optional-codex-implementation",
+  "completion_review_status": "ship",
+  "completion_reviewed_at": "2026-06-05T02:48:54.980698Z",
+  "created_at": "2026-06-04T21:35:42.368673Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [],
+  "id": "fn-55-optional-codex-implementation",
+  "next_task": 1,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-06-04T23:07:27.900575Z",
+  "spec_path": ".flow/specs/fn-55-optional-codex-implementation.md",
+  "status": "done",
+  "title": "Optional Codex implementation-delegation mode for /flow-next:work (gpt-5.5)",
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "id": "FLOW-6",
+    "identifier": "FLOW-6",
+    "lastSyncedAt": "2026-06-04T23:08:52.147332Z",
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": "https://linear.app/gmickel/issue/FLOW-6"
+  },
+  "updated_at": "2026-06-05T09:02:24.467170Z"
+}

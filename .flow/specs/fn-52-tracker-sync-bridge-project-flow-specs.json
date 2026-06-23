@@ -1,0 +1,28 @@
+{
+  "branch_name": "fn-52-tracker-sync-bridge-project-flow-specs",
+  "completion_review_status": "ship",
+  "completion_reviewed_at": "2026-06-03T14:38:15.316680Z",
+  "created_at": "2026-06-01T12:34:13.915239Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [],
+  "id": "fn-52-tracker-sync-bridge-project-flow-specs",
+  "next_task": 1,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-06-03T08:55:40.150258Z",
+  "spec_path": ".flow/specs/fn-52-tracker-sync-bridge-project-flow-specs.md",
+  "status": "done",
+  "title": "Tracker sync bridge: project .flow specs to Linear then GitHub, reconciled status/comments",
+  "tracker": {
+    "baseHashFlow": null,
+    "baseHashTracker": null,
+    "id": "FLOW-3",
+    "identifier": "FLOW-3",
+    "lastSyncedAt": "2026-06-03T21:46:10.742989Z",
+    "mergeBaseFlow": null,
+    "mergeBaseTracker": null,
+    "url": "https://linear.app/gmickel/issue/FLOW-3"
+  },
+  "updated_at": "2026-06-03T21:46:10.743141Z"
+}

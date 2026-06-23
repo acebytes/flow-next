@@ -7,6 +7,7 @@ Execute these phases in order. Each gates on the prior. Stop on user-blocking er
 ```bash
 set -e
 FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/flowctl"
+[ -x "$FLOWCTL" ] || FLOWCTL=".flow/bin/flowctl"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 MEMORY_DIR="$REPO_ROOT/.flow/memory"
 MIGRATED_DIR="$MEMORY_DIR/_migrated"
@@ -181,7 +182,7 @@ For each entry:
 
 **Interactive mode:**
 
-Use `AskUserQuestion` (sync-codex.sh rewrites to `request_user_input` in the Codex mirror). Lead with the mechanical default as the recommendation:
+Use `AskUserQuestion` (sync-codex.sh rewrites this to a plain-text numbered prompt in the Codex mirror.). Lead with the mechanical default as the recommendation:
 
 ```
 Entry: "Auth token refresh race during logout" (from pitfalls.md)

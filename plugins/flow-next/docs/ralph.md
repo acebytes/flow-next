@@ -1,8 +1,10 @@
 # Ralph — Autonomous Loop
 
-Ralph is Flow-Next's repo-local autonomous harness. It loops over tasks, applies multi-model review gates, and produces production-quality code overnight.
+Ralph is Flow-Next's repo-local **hardened** autonomous harness. It exists because long-lived autonomous sessions accumulate failed attempts and stale assumptions — Ralph instead starts a *fresh* session per iteration, re-anchors, and gates every transition on receipts. It consumes **fully planned** specs only (it never plans), applies multi-model review gates, and produces production-quality code overnight.
 
 > **TL;DR**: External shell loop → fresh Claude session per task → cross-model review gates → receipt-based proof-of-work → iterate until SHIP.
+>
+> **Which loop do I want?** The default autonomy path is the in-session **pilot + land pipeline** (`/loop 10m /flow-next:pilot` to build, `/loop 30m /flow-next:land` to ship) — zero scaffold, transcript verdicts, host-driven. Reach for Ralph when a run outlasts a session or prose guardrails aren't enough: Ralph owns the loop in a shell script with hook-enforced guardrails. The two are alternative drivers for the same pipeline and are **never nested**. See [Host-driven loop vs Ralph](#host-driven-loop-vs-ralph).
 
 ---
 
@@ -12,6 +14,7 @@ Ralph is Flow-Next's repo-local autonomous harness. It loops over tasks, applies
 - [Architecture](#architecture)
   - [How It Works](#how-it-works)
   - [Why Ralph vs ralph-wiggum](#why-ralph-vs-ralph-wiggum)
+  - [Host-driven loop vs Ralph](#host-driven-loop-vs-ralph)
 - [Quality Gates](#quality-gates)
   - [Multi-Model Reviews](#1-multi-model-reviews)
   - [Plan Review Gate](#plan-review-gate)
@@ -133,7 +136,7 @@ flowchart TD
   C --> D[/flow-next:plan-review/]
   B -->|work needed| E[/flow-next:work/]
   E --> F[/flow-next:impl-review/]
-  B -->|completion review needed| K[/flow-next:epic-review/]
+  B -->|completion review needed| K[/flow-next:spec-completion-review/]
   D --> G{Receipt valid?}
   F --> G
   K --> G
@@ -169,6 +172,35 @@ Anthropic's official ralph-wiggum uses a Stop hook to keep Claude in the same se
 
 **Ralph's solution:** Fresh context + multi-model review gates + receipt-based proof-of-work.
 
+### Host-driven loop vs Ralph
+
+**Pilot + land are the default autonomy path** — `/flow-next:pilot` builds (ready spec → draft PR, in-session, host `/loop` / `/goal` owns repetition) and `/flow-next:land` ships (draft PR → merged + released). Ralph is the **hardened harness** for the work segment: it consumes specs that are already **fully planned** (its loop iterates plan-review → work → impl-review → completion review — it never runs the planning fan-out), trades in-session convenience for fresh-session isolation + hook-enforced guardrails, and needs no host loop primitive at all (cron-able on a headless server). Reach for it when a run outlasts a session (`/loop` jobs expire after 7 days) or when prose guardrails aren't enough.
+
+| Aspect | Ralph | Pilot |
+|--------|-------|-------|
+| Scope | fully **planned** spec → work → reviews (never plans) | ready spec → plan → reviews → work → draft PR |
+| Loop owner | External `ralph.sh` | Host `/loop` / `/goal` |
+| Session | Fresh per iteration | In-session ticks |
+| Proof-of-work | Receipts under `.flow/review-receipts/` | `PILOT_VERDICT` lines echoed to the transcript |
+| Guard hooks | ralph-guard / DCG | None (`FLOW_AUTONOMOUS`, not `FLOW_RALPH`) |
+| Stuck handling | Auto-block after N failures | Two-strike `spec unready` |
+| Best for | Overnight unattended scale | In-session backlog draining |
+
+Never nest them. Pilot hard-errors when invoked under `FLOW_RALPH` / `REVIEW_RECEIPT_PATH`; Ralph and pilot are alternative drivers for the same pipeline.
+
+Both drivers deliberately stop at a **draft PR**. The third loop, [`/flow-next:land`](../skills/flow-next-land/SKILL.md), babysits those PRs the rest of the way — CI tri-state fix loop, reviewer patience window, resolve-pr convergence, gated explicit merge, spec close, release-follow — and ends each tick with a terminal `LAND_VERDICT` line. Land refuses to nest under the Ralph harness too (same `FLOW_RALPH` / `REVIEW_RECEIPT_PATH` guard).
+
+Driver recipes:
+
+- Claude Code `/loop` v2.1.72+ (loops expire after 7 days): `/loop 10m /flow-next:pilot`
+- Claude Code `/goal` v2.1.139+ (`/goal` validators are transcript-blind, so phrase the stop condition against the verdict grammar): `/goal keep running /flow-next:pilot until it prints PILOT_VERDICT=NO_WORK, or stop after 20 turns` — note `PILOT_VERDICT=DEFERRED_TO_LAND` is its own terminal (an all-done spec whose open PR land owns); route it to `/flow-next:land`, not a pilot re-run.
+- Codex `/goal`: opt-in `[features] goals = true`, CLI >= 0.128.0. No `$skill-in-goal` syntax — write a plain-text objective that names pilot behavior and `PILOT_VERDICT=<ADVANCED|NO_WORK|DEFERRED_TO_LAND|BLOCKED|NEEDS_HUMAN>` (`DEFERRED_TO_LAND` routes to land, not a pilot re-run).
+- Ship loop (after the build loop's draft PRs are open — babysitting waits on external CI/reviewer events, so use a cadence): `/loop 30m /flow-next:land`
+
+**The full pipeline** runs pilot and land **concurrently** — pilot builds spec N while land babysits spec N−1's PR. Same-session (two `/loop` jobs, ticks serialize) works for small backlogs; the real assembly line is **two instances** (Claude Code / Codex), each in **its own clone or git worktree** — both loops mutate the working tree (pilot checks out spec branches, land checks out PR branches for CI fixes), so two loops sharing one checkout would trip each other's dirty-tree guards. GitHub is the shared state: land pushes the spec close after merging, pilot pulls the base branch before planning, and the strike ledgers are per-clone by design. The loops never contend: land touches only specs with all tasks done (in-flight specs stay pilot's), and pilot skips specs that already have an open PR.
+
+The `rp` review backend runs headlessly via rp-cli as long as the Repo Prompt app is running on the same Mac (cold start: `open -ga "Repo Prompt"` — MCP responds within seconds; a stopped app fails fast, never hangs). On machines without the app (remote/CI), use `--review=codex`, `--review=copilot`, or `--review=none`.
+
 ---
 
 ## Quality Gates
@@ -192,7 +224,7 @@ Two review types:
 
 ### Plan Review Gate
 
-The plan review gate ensures epics are architecturally sound before any implementation begins. This catches design issues early when they're cheap to fix.
+The plan review gate ensures specs are architecturally sound before any implementation begins. This catches design issues early when they're cheap to fix.
 
 #### How It Works
 
@@ -200,12 +232,12 @@ The plan review gate ensures epics are architecturally sound before any implemen
 ┌─────────────────────────────────────────────────────────────┐
 │  flowctl next --require-plan-review                         │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │  1. Find epics with plan_review_status = unknown       │ │
-│  │  2. Return status=plan, epic=fn-1                      │ │
+│  │  1. Find specs with plan_review_status = unknown       │ │
+│  │  2. Return status=plan, spec=fn-1                      │ │
 │  │  3. Ralph invokes /flow-next:plan-review fn-1          │ │
 │  │  4. Skill loops until <verdict>SHIP</verdict>          │ │
-│  │  5. flowctl epic set-plan-review-status fn-1 --status ship │
-│  │  6. Next iteration: epic unlocked for work             │ │
+│  │  5. flowctl spec set-plan-review-status fn-1 --status ship │
+│  │  6. Next iteration: spec unlocked for work             │ │
 │  └────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -228,15 +260,15 @@ PLAN_REVIEW=codex       # Backend: rp, codex, or export
 | `1` | `export` | Context exported for manual review |
 | `1` | `none` | **Blocked forever** — no backend to review |
 
-> **Common mistake:** Setting `REQUIRE_PLAN_REVIEW=1` without a `PLAN_REVIEW` backend. Ralph will block on every epic with no way to proceed.
+> **Common mistake:** Setting `REQUIRE_PLAN_REVIEW=1` without a `PLAN_REVIEW` backend. Ralph will block on every spec with no way to proceed.
 
 #### The Review Cycle
 
 When `flowctl next` returns `status=plan`:
 
-1. **Checkpoint** — Save epic state before review
+1. **Checkpoint** — Save spec state before review
    ```bash
-   flowctl checkpoint save --epic fn-1 --json
+   flowctl checkpoint save --spec fn-1 --json
    ```
 
 2. **Review** — Invoke the plan review skill
@@ -246,7 +278,7 @@ When `flowctl next` returns `status=plan`:
 
 3. **Fix loop** — If `NEEDS_WORK`:
    - Parse reviewer feedback
-   - Update epic spec via `flowctl epic set-plan`
+   - Update spec via `flowctl spec set-plan`
    - Sync affected task specs via `flowctl task set-spec`
    - Re-review (same chat for RP, receipt continuity for Codex)
    - Repeat until `SHIP`
@@ -258,7 +290,7 @@ When `flowctl next` returns `status=plan`:
 
 5. **Unlock** — Set status to ship
    ```bash
-   flowctl epic set-plan-review-status fn-1 --status ship
+   flowctl spec set-plan-review-status fn-1 --status ship
    ```
 
 #### Recovery
@@ -266,21 +298,21 @@ When `flowctl next` returns `status=plan`:
 If context compacts during review cycles:
 
 ```bash
-flowctl checkpoint restore --epic fn-1 --json
+flowctl checkpoint restore --spec fn-1 --json
 ```
 
-This restores the epic/task state from before the review started.
+This restores the spec/task state from before the review started.
 
 #### Inspecting Plan Review Status
 
 ```bash
-# Check all epics
-flowctl epics --json | jq '.epics[] | {id, plan_review_status}'
+# Check all specs
+flowctl specs --json | jq '.specs[] | {id, plan_review_status}'
 
-# Check specific epic
+# Check specific spec
 flowctl show fn-1 --json | jq '.plan_review_status'
 
-# Find epics needing review
+# Find specs needing review
 flowctl next --require-plan-review --json
 ```
 
@@ -289,14 +321,14 @@ flowctl next --require-plan-review --json
 | Aspect | Plan Review | Impl Review |
 |--------|-------------|-------------|
 | **When** | Before coding | After coding |
-| **Reviews** | Epic + task specs | Code changes |
-| **Blocks** | All tasks in epic | Single task |
+| **Reviews** | Spec + task markdown | Code changes |
+| **Blocks** | All tasks in spec | Single task |
 | **Focus** | Architecture, feasibility, scope | Correctness, security, tests |
 | **Config** | `PLAN_REVIEW` + `REQUIRE_PLAN_REVIEW` | `WORK_REVIEW` |
 
-### Epic-Completion Review Gate
+### Spec-Completion Review Gate
 
-The epic-completion review gate ensures implementation matches the spec before closing an epic. Runs after all tasks complete, checking for requirement gaps.
+The spec-completion review gate ensures implementation matches the spec before closing it. Runs after all tasks complete, checking for requirement gaps.
 
 #### How It Works
 
@@ -305,11 +337,11 @@ The epic-completion review gate ensures implementation matches the spec before c
 │  flowctl next --require-completion-review                    │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │  1. All tasks done, completion_review_status != ship   │ │
-│  │  2. Return status=completion_review, epic=fn-1         │ │
-│  │  3. Ralph invokes /flow-next:epic-review fn-1          │ │
+│  │  2. Return status=completion_review, spec=fn-1         │ │
+│  │  3. Ralph invokes /flow-next:spec-completion-review fn-1 │ │
 │  │  4. Skill loops until <verdict>SHIP</verdict>          │ │
-│  │  5. flowctl epic set-completion-review-status fn-1 --status ship │
-│  │  6. Next iteration: epic can close                     │ │
+│  │  5. flowctl spec set-completion-review-status fn-1 --status ship │
+│  │  6. Next iteration: spec can close                     │ │
 │  └────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -327,15 +359,15 @@ When `COMPLETION_REVIEW != none`, Ralph passes `--require-completion-review` to 
 |---------------------|----------|
 | `rp` | Completion reviewed via RepoPrompt |
 | `codex` | Completion reviewed via Codex CLI |
-| `none` | No completion review, epics close immediately |
+| `none` | No completion review, specs close immediately |
 
 #### The Review Cycle
 
 When `flowctl next` returns `status=completion_review`:
 
-1. **Review** — Invoke the epic-review skill
+1. **Review** — Invoke the spec-completion-review skill
    ```bash
-   /flow-next:epic-review fn-1 --review=codex
+   /flow-next:spec-completion-review fn-1 --review=codex
    ```
 
 2. **Fix loop** — If `NEEDS_WORK`:
@@ -351,10 +383,10 @@ When `flowctl next` returns `status=completion_review`:
 
 4. **Unlock** — Set status to ship
    ```bash
-   flowctl epic set-completion-review-status fn-1 --status ship
+   flowctl spec set-completion-review-status fn-1 --status ship
    ```
 
-5. **Close** — Epic can now close normally
+5. **Close** — Spec can now close normally
 
 #### What Completion Review Catches
 
@@ -370,7 +402,7 @@ When `flowctl next` returns `status=completion_review`:
 | Aspect | Impl Review | Completion Review |
 |--------|-------------|-------------------|
 | **When** | After each task | After all tasks done |
-| **Scope** | Single task acceptance | Entire epic spec |
+| **Scope** | Single task acceptance | Entire spec |
 | **Checks** | Code quality, tests | Spec compliance |
 | **Focus** | "Is this task done right?" | "Did we deliver everything?" |
 | **Config** | `WORK_REVIEW` | `COMPLETION_REVIEW` |
@@ -391,6 +423,8 @@ Every review produces a receipt JSON:
 **No receipt = no progress.** Ralph retries until receipt exists.
 
 This is at-least-once delivery. The agent is untrusted; receipts are proof-of-work.
+
+**`/flow-next:qa` emits a `type: qa_verdict` receipt** (live-app QA pass). The Ralph guard validates only `verdict ∈ {SHIP, NEEDS_WORK, MAJOR_RETHINK}`, so the four QA outcomes are carried in a separate `qa_outcome` field while `verdict` holds the enum-compatible projection: `SHIP → SHIP`, `NEEDS_WORK → NEEDS_WORK`, **`BLOCKED → NEEDS_WORK`** (could not verify → no ship claim on a QA basis), **`N/A → SHIP`** (no driveable UI → live QA raises no objection). Written to the caller-supplied `--receipt` / `REVIEW_RECEIPT_PATH`, else `.flow/review-receipts/qa-<spec-id>.json`. In autonomous mode QA proceeds only when target URL + test accounts are configured (it asks the user otherwise) — it always reaches a verdict and always writes a valid receipt; it is **not a hard Ralph receipt-gate in v1** (`parse_receipt_path` is unextended — a `qa-*.json` path validates via the existing verdict-enum check; gating a future board-executor is deferred).
 
 ### 3. Review Loops Until SHIP
 
@@ -466,7 +500,20 @@ Edit `scripts/ralph/config.env`:
 
 | Variable | Example | Description |
 |----------|---------|-------------|
-| `EPICS` | `fn-1,fn-2` | Limit to specific epics (empty = all) |
+| `SPECS` | `fn-1,fn-2` | Limit to specific specs (empty = all). Legacy `EPICS=` is also accepted; the template resolves `SPECS_FILE`/`EPICS_FILE` and `SPECS`/`EPICS` in cascade so existing `config.env` files keep working. |
+
+#### `EPICS_FILE` → `SPECS_FILE` (1.0 rename)
+
+flow-next 1.0 renamed the config-env knob `EPICS_FILE` to `SPECS_FILE` (and the matching `EPICS` list to `SPECS`). The Ralph init template (`scripts/ralph/config.env`) writes `SPECS_FILE=` / `SPECS=` for fresh installs.
+
+For existing repos with `config.env` files written by older templates, both names continue to work. `ralph.sh` resolves the canonical name first and falls back to the legacy name:
+
+```bash
+SPECS_FILE="${SPECS_FILE:-${EPICS_FILE:-}}"
+SPECS="${SPECS:-${EPICS:-}}"
+```
+
+Externally-set env vars are preserved (the resolver does not clobber `SPECS_FILE` if the user/script set it explicitly). The aliases follow the same telemetry-driven contract as the `flowctl epic` → `flowctl spec` rename: soft-removal target 2.0.0, NOT a hard sunset (R28). To migrate, edit `scripts/ralph/config.env` and rename the keys; no other action is required.
 
 ### Permissions
 
@@ -550,6 +597,18 @@ scripts/ralph/runs/<run-id>/
 └── block-fn-1.2.md        # Written when task auto-blocked
 ```
 
+### Tracker-sync conflicts never block
+
+If the optional `/flow-next:tracker-sync` bridge is enabled (the discovery ceremony activates `tracker.perEvent.*` by default), a sync run **never blocks the Ralph loop**. Every run emits a receipt (`flowctl sync receipt`); a genuine body/status contradiction is **queued**, not raised. In autonomous mode an `always-ask` tiebreak (`tracker.conflictTiebreak`) resolves to *queue*, not prompt — same policy, surface-dependent delivery. The conflict lands in the **review deferred-findings sink** (`.flow/review-deferred/<branch>.md`), where the morning review already looks for deferred work — so tracker-sync needs **no `flowctl block`** and never stalls the run. Confident merges proceed unattended. See [`tracker-sync.md`](tracker-sync.md).
+
+### HTML render lenses generate only — never poll
+
+With the opt-in HTML artifact mode active (`artifacts.html.enabled`, OFF by default), autonomous runs may **generate** render lenses at the normal lifecycle touchpoints — plan regenerates `.flow/artifacts/<spec-id>/spec.html`, make-pr emits `pr.html` with its narrow `chore(flow): pr artifact <spec-id>` commit — but they **never open a Lavish session and never run `lavish-axi poll`**: an autonomous loop never blocks on a human. The guard is mechanical in the skill snippets (the non-interactive marker family — `FLOW_RALPH`, `FLOW_AUTONOMOUS`, `REVIEW_RECEIPT_PATH` — forces `LAVISH_OK=false`), not prose-only. Artifact generation failure is non-fatal (one stderr note, the run proceeds), all artifact messaging routes to stderr, and the make-pr `PR_URL=<url>` single-line stdout contract plus every receipt are untouched. See [`html-artifacts.md`](html-artifacts.md).
+
+### Codex implementation-delegation is consent-gated and non-blocking
+
+The opt-in `/flow-next:work` Codex delegation mode (`work.delegate` / `delegate:codex`) is **off by default** and stays safe under autonomous mode. In Ralph / headless there is **no live consent prompt** (a spawned worker subagent has no interactive consent path), so delegation proceeds **only when `work.delegateConsent` is already `true`** — pre-set deliberately before the run. Otherwise the loop runs standard in-session, unchanged; there is no live `AskUserQuestion`. Every delegation failure path **falls back without stalling**: a `codex exec` CLI failure or a partial result rolls back the scoped diff (never a bare `git clean`) and the worker finishes the task locally — the loop keeps moving. A **host-owned circuit breaker** disables delegation for the rest of the run after repeated failures, again falling through to standard mode rather than blocking. `work.delegateSandbox=yolo` (the default) has the **wider blast radius** — for unattended runs prefer `full-auto`, or leave consent off entirely. The independent-verification backstop still applies: with `REVIEW_MODE=none` the worker runs its own tests/lint on the delegated diff before `flowctl done`, so a delegated commit is never trusted on the strength of the Codex `verification_summary` alone. See [`codex-delegation.md`](../skills/flow-next-work/references/codex-delegation.md).
+
 ---
 
 ## Controlling Ralph
@@ -557,7 +616,7 @@ scripts/ralph/runs/<run-id>/
 ### CLI Commands
 
 ```bash
-flowctl status                    # Epic/task counts + active runs
+flowctl status                    # Spec/task counts + active runs
 flowctl ralph pause               # Pause run
 flowctl ralph resume              # Resume run
 flowctl ralph stop                # Graceful stop
@@ -679,7 +738,7 @@ curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/destructive_comm
 
 **Compatibility:** DCG uses fail-open design — timeouts allow commands. Flow-next uses safe git patterns and quoted heredocs that DCG handles correctly.
 
-> **Note:** DCG will block `rm -rf .flow/` and `rm -rf scripts/ralph/` — this is correct behavior. Uninstall commands should be run manually, not via AI agents. Your epics and tasks are protected.
+> **Note:** DCG will block `rm -rf .flow/` and `rm -rf scripts/ralph/` — this is correct behavior. Uninstall commands should be run manually, not via AI agents. Your specs and tasks are protected.
 
 **Verify:**
 
@@ -729,7 +788,7 @@ plugins/flow-next/
 
 ### Plan Review Never Starts
 
-**Symptoms:** Ralph exits with `NO_WORK` but epics have `plan_review_status: unknown`.
+**Symptoms:** Ralph exits with `NO_WORK` but specs have `plan_review_status: unknown`.
 
 **Check config:**
 
@@ -751,7 +810,7 @@ grep -E "REQUIRE_PLAN_REVIEW|PLAN_REVIEW" scripts/ralph/config.env
 flowctl next --require-plan-review --json
 ```
 
-Should return `status: "plan"` if epics need review.
+Should return `status: "plan"` if specs need review.
 
 ### Plan Review Blocked Forever
 
@@ -760,7 +819,7 @@ Should return `status: "plan"` if epics need review.
 **Check:**
 
 ```bash
-# What's the epic status?
+# What's the spec status?
 flowctl show fn-1 --json | jq '.plan_review_status'
 
 # Is there a receipt?
@@ -785,9 +844,9 @@ PLAN_REVIEW=codex
 REQUIRE_PLAN_REVIEW=0
 ```
 
-### Dependent Epics Not Starting
+### Dependent Specs Not Starting
 
-**Symptoms:** Epic A completes, but Epic B (depends on A) never starts.
+**Symptoms:** Spec A completes, but Spec B (depends on A) never starts.
 
 **Check:**
 
@@ -796,16 +855,16 @@ REQUIRE_PLAN_REVIEW=0
 flowctl show fn-1 --json | jq '.status'
 
 # Does B depend on A?
-flowctl show fn-2 --json | jq '.depends_on_epics'
+flowctl show fn-2 --json | jq '.depends_on_specs'
 ```
 
-**Common cause:** Race condition — selector runs before `maybe_close_epics()`. Fixed in v0.18.23+.
+**Common cause:** Race condition — selector runs before `maybe_close_specs()`. Fixed in v0.18.23+.
 
 **Workaround for older versions:**
 
 ```bash
-# Manually close the epic
-flowctl epic close fn-1 --json
+# Manually close the spec
+flowctl spec close fn-1 --json
 
 # Re-run Ralph
 scripts/ralph/ralph.sh
@@ -927,7 +986,7 @@ ls scripts/ralph/runs/*/receipts/
 git log --oneline
 ```
 
-### 3. Review by Epic
+### 3. Review by Spec
 
 Commits include task IDs (`feat(fn-1.1): ...`):
 
@@ -946,7 +1005,7 @@ git merge ralph-<run-id>
 # Or: gh pr create
 ```
 
-**One epic is bad — cherry-pick good ones:**
+**One spec is bad — cherry-pick good ones:**
 
 ```bash
 git checkout main
@@ -955,7 +1014,7 @@ git cherry-pick <fn-2-commits>
 # Skip fn-3
 ```
 
-**One epic is bad — revert and merge:**
+**One spec is bad — revert and merge:**
 
 ```bash
 git checkout ralph-<run-id>
@@ -976,6 +1035,6 @@ flowctl show fn-1.1 --json | jq '.evidence.commits'
 ## References
 
 - [flowctl CLI](flowctl.md)
-- [Flow-Next README](../README.md)
+- [Flow-Next README](../../../README.md) (repo root — canonical)
 - [flow-next-tui](../../../flow-next-tui/README.md)
 - Test scripts: `plugins/flow-next/scripts/ralph_e2e_*.sh`

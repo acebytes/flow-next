@@ -1,0 +1,19 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-05-15T19:42:38.263931Z",
+  "depends_on": [
+    "fn-44-symmetric-interview.1",
+    "fn-44-symmetric-interview.2",
+    "fn-44-symmetric-interview.3",
+    "fn-44-symmetric-interview.5"
+  ],
+  "id": "fn-44-symmetric-interview.9",
+  "priority": null,
+  "spec": "fn-44-symmetric-interview",
+  "spec_path": ".flow/tasks/fn-44-symmetric-interview.9.md",
+  "status": "todo",
+  "title": "Codex mirror sync + R22 baseline smoke + unit tests",
+  "updated_at": "2026-05-15T20:02:02.031375Z"
+}

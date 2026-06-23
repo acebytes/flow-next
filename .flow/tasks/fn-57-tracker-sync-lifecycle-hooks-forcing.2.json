@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-06-09T19:57:59.074022Z",
+  "depends_on": [
+    "fn-57-tracker-sync-lifecycle-hooks-forcing.1"
+  ],
+  "id": "fn-57-tracker-sync-lifecycle-hooks-forcing.2",
+  "priority": null,
+  "spec": "fn-57-tracker-sync-lifecycle-hooks-forcing",
+  "spec_path": ".flow/tasks/fn-57-tracker-sync-lifecycle-hooks-forcing.2.md",
+  "status": "todo",
+  "title": "tracker-sync skill: --event on all receipt callers + linear-mcp.md UUID correction",
+  "updated_at": "2026-06-09T19:59:10.646324Z"
+}

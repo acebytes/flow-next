@@ -13,7 +13,7 @@ Use `AskUserQuestion` to confirm:
 
 If cancel → stop.
 
-**Question 2:** "Keep your .flow/ tasks and epics?"
+**Question 2:** "Keep your .flow/ tasks and specs?"
 - "Yes, keep tasks" → partial uninstall
 - "No, remove everything" → full uninstall
 
@@ -25,7 +25,7 @@ Based on answers, generate the appropriate commands and print them for the user 
 ```
 To complete uninstall, run these commands manually:
 
-rm -rf .flow/bin .flow/usage.md
+rm -rf .flow/bin .flow/templates .flow/usage.md
 ```
 
 **If removing everything:**

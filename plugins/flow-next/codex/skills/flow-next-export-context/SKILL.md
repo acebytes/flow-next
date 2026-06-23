@@ -1,6 +1,6 @@
 ---
 name: flow-next-export-context
-description: Export RepoPrompt context for external LLM review (ChatGPT, Claude web, etc.). Use when you want to review code or plans with an external model. Triggers on /flow-next:export-context.
+description: Export RepoPrompt context to a markdown file for review with an external LLM (ChatGPT, Claude web, etc.). Use when you want Carmack-level review but prefer an external model. Triggers on "export context", "export for external review", "export plan for ChatGPT", "export impl review context", "review with an external model", "export review context".
 ---
 
 # Export Context Mode
@@ -9,11 +9,13 @@ Build RepoPrompt context and export to a markdown file for use with external LLM
 
 **Use case**: When you want Carmack-level review but prefer to use an external model.
 
-**CRITICAL: flowctl is BUNDLED — NOT installed globally.** `which flowctl` will fail (expected). Always use:
+## Preamble
+
+**CRITICAL: flowctl is BUNDLED — NOT installed globally.** `which flowctl` will fail (expected). Define once; subsequent blocks use `$FLOWCTL`:
+
 ```bash
-FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$HOME/.codex}}/scripts/flowctl"
+FLOWCTL="$HOME/.codex/scripts/flowctl"
 [ -x "$FLOWCTL" ] || FLOWCTL=".flow/bin/flowctl"
-$FLOWCTL <command>
 ```
 
 ## Input
@@ -22,17 +24,18 @@ Arguments: $ARGUMENTS
 Format: `<type> <target> [focus areas]`
 
 Types:
-- `plan <epic-id>` - Export plan review context
+- `plan <spec-id>` - Export plan review context
 - `impl` - Export implementation review context (current branch)
 
+This skill is phrase-triggered (no slash command) — invoke it by asking in natural language; the host agent parses `<type> <target> [focus areas]` from the request.
+
 Examples:
-- `/flow-next:export-context plan fn-1 focus on security`
-- `/flow-next:export-context impl focus on the auth changes`
+- "export context for plan fn-1, focus on security"
+- "export impl review context, focus on the auth changes"
 
 ## Setup
 
 ```bash
-FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$HOME/.codex}}/scripts/flowctl"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 ```
 
@@ -46,8 +49,8 @@ Parse arguments to determine if this is a plan or impl export.
 
 **For plan export:**
 ```bash
-$FLOWCTL show <epic-id> --json
-$FLOWCTL cat <epic-id>
+$FLOWCTL show <spec-id> --json
+$FLOWCTL cat <spec-id>
 ```
 
 **For impl export:**

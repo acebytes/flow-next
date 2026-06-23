@@ -13,17 +13,20 @@ This skill IS the audit. The host agent (Claude Code / Codex / Droid) walks `.fl
 
 Decision entries (`.flow/memory/knowledge/decisions/`) and glossary terms (`GLOSSARY.md` files at the repo root and on the ancestor chain) are walked alongside the rest of memory. Decisions get a calibrated judging question — "does the constraint that motivated this choice still hold?" — and Replace becomes a two-step supersession (write successor, mark old `decision_status: superseded`, never `git rm`). Glossary terms are scanned for code usage; zero-hit terms get a `<!-- stale: ... -->` HTML comment via Edit tool (no `flowctl glossary mark-stale` exists), `_Avoid_` aliases appearing in code surface as alias-creep findings.
 
-There is no Python audit-engine, no codex/copilot subprocess dispatch, no deterministic scorer. The host agent is already an LLM and does the work directly. flowctl provides only thin persistence plumbing (`memory mark-stale`, `memory mark-fresh`, `memory search --status`) — landed by Task 2 of this epic.
+There is no Python audit-engine, no codex/copilot subprocess dispatch, no deterministic scorer. The host agent is already an LLM and does the work directly. flowctl provides only thin persistence plumbing (`memory mark-stale`, `memory mark-fresh`, `memory search --status`) — landed by Task 2 of this spec.
 
 **Read [workflow.md](workflow.md) for the full phase-by-phase execution. Read [phases.md](phases.md) for the 5-outcomes lookup with memory-schema-specific calibration.**
 
-**CRITICAL: flowctl is BUNDLED — NOT installed globally.** `which flowctl` will fail (expected). Always use:
+## Preamble
+
+**CRITICAL: flowctl is BUNDLED — NOT installed globally.** `which flowctl` will fail (expected). Define once; subsequent blocks (here and in `workflow.md`) use `$FLOWCTL`:
 
 ```bash
 FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/flowctl"
+[ -x "$FLOWCTL" ] || FLOWCTL=".flow/bin/flowctl"
 ```
 
-**Inline skill (no `context: fork`)** — `AskUserQuestion` must stay reachable across phases. Subagents can't call blocking question tools (Claude Code issues #12890, #34592). Phase 3 (Ask) and Phase 6 (Discoverability check) both require user choice in interactive mode. (sync-codex.sh rewrites `AskUserQuestion` to `request_user_input` in the Codex mirror.)
+**Inline skill (no `context: fork`)** — `AskUserQuestion` must stay reachable across phases. Subagents can't call blocking question tools (Claude Code issues #12890, #34592). Phase 3 (Ask) and Phase 6 (Discoverability check) both require user choice in interactive mode. (sync-codex.sh rewrites this to a plain-text numbered prompt in the Codex mirror.)
 
 ## Mode Detection
 
@@ -90,7 +93,6 @@ Same pattern as `/flow-next:plan` and `/flow-next:prospect` — non-blocking not
 if [[ -f .flow/meta.json ]]; then
   SETUP_VER=$(jq -r '.setup_version // empty' .flow/meta.json 2>/dev/null)
   PLUGIN_JSON="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.claude-plugin/plugin.json"
-  [[ -f "$PLUGIN_JSON" ]] || PLUGIN_JSON="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.factory-plugin/plugin.json"
   PLUGIN_VER=$(jq -r '.version' "$PLUGIN_JSON" 2>/dev/null || echo "unknown")
   if [[ -n "$SETUP_VER" && "$PLUGIN_VER" != "unknown" && "$SETUP_VER" != "$PLUGIN_VER" ]]; then
     echo "Plugin updated to v${PLUGIN_VER}. Run /flow-next:setup to refresh local scripts (current: v${SETUP_VER})." >&2

@@ -8,17 +8,36 @@ user-invocable: false
 
 Manually trigger plan-sync to update downstream task specs.
 
-**CRITICAL: flowctl is BUNDLED - NOT installed globally.** Always use:
+## Preamble
+
+**CRITICAL: flowctl is BUNDLED - NOT installed globally.** Define once; subsequent blocks use `$FLOWCTL`:
+
 ```bash
 FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/flowctl"
+[ -x "$FLOWCTL" ] || FLOWCTL=".flow/bin/flowctl"
 ```
+
+## Pre-check: Local setup version
+
+Non-blocking, same pattern as `/flow-next:plan` — one-line nag when the local setup lags the plugin:
+
+```bash
+SETUP_VER=$(jq -r '.setup_version // empty' .flow/meta.json 2>/dev/null)
+PLUGIN_JSON="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.claude-plugin/plugin.json"
+PLUGIN_VER=$(jq -r '.version' "$PLUGIN_JSON" 2>/dev/null || echo "unknown")
+if [[ -n "$SETUP_VER" && "$PLUGIN_VER" != "unknown" && "$SETUP_VER" != "$PLUGIN_VER" ]]; then
+  echo "Plugin updated to v${PLUGIN_VER}. Run /flow-next:setup to refresh local scripts (current: v${SETUP_VER})." >&2
+fi
+```
+
+Continue regardless (never blocks; silent when setup was never run or versions match).
 
 ## Input
 
 Arguments: $ARGUMENTS
 Format: `<id> [--dry-run]`
 
-- `<id>` - task ID `fn-N-slug.M` (or legacy `fn-N.M`, `fn-N-xxx.M`) or epic ID `fn-N-slug` (or legacy `fn-N`, `fn-N-xxx`)
+- `<id>` - task ID `fn-N-slug.M` (or legacy `fn-N.M`, `fn-N-xxx.M`) or spec ID `fn-N-slug` (or legacy `fn-N`, `fn-N-xxx`), **or a resolvable tracker handle** (`wor-17` / `wor-17.M`) that `flowctl show` maps to the linked spec/task (fn-52.10, R16)
 - `--dry-run` - show changes without writing
 
 ## Workflow
@@ -26,7 +45,6 @@ Format: `<id> [--dry-run]`
 ### Step 1: Parse Arguments
 
 ```bash
-FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/flowctl"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 ```
 
@@ -34,14 +52,14 @@ Parse $ARGUMENTS for:
 - First positional arg = `ID`
 - `--dry-run` flag = `DRY_RUN` (true/false)
 
-**Validate ID format first:**
-- Must start with `fn-`
+**Validate ID first (handle-recognition rule, R16):**
+- Do NOT gate on a hard "must start with `fn-`" check. Route the arg through `$FLOWCTL show <ID> --json` (Step 3) — flowctl's widened resolver (fn-52.10) maps a tracker key (`wor-17` / `wor-17.M`) to its linked spec/task, so a resolvable handle is the existing spec/task, never a new id. So `/flow-next:sync wor-17` resolves the linked spec.
 - If no ID provided: "Usage: /flow-next:sync <id> [--dry-run]"
-- If doesn't match `fn-*` pattern: "Invalid ID format. Use fn-N-slug (epic) or fn-N-slug.M (task). Legacy fn-N, fn-N-xxx also work."
+- If the arg does NOT resolve via `flowctl show` (Step 3): "Unknown ID. Use fn-N-slug (spec) / fn-N-slug.M (task), a tracker handle (wor-17), or legacy fn-N, fn-N-xxx."
 
-Detect ID type:
-- Contains `.` (e.g., fn-1.2 or fn-1-add-oauth.2) -> task ID
-- No `.` (e.g., fn-1 or fn-1-add-oauth) -> epic ID
+Detect ID type (use the canonical id from `flowctl show`):
+- Contains `.` (e.g., fn-1.2, fn-1-add-oauth.2, wor-17.2) -> task ID
+- No `.` (e.g., fn-1, fn-1-add-oauth, wor-17) -> spec ID
 
 ### Step 2: Validate Environment
 
@@ -59,7 +77,7 @@ $FLOWCTL show <ID> --json
 
 If command fails:
 - For task ID: "Task <id> not found. Run `flowctl list` to see available."
-- For epic ID: "Epic <id> not found. Run `flowctl epics` to see available."
+- For spec ID: "Spec <id> not found. Run `flowctl specs` to see available."
 
 Stop on failure.
 
@@ -67,18 +85,18 @@ Stop on failure.
 
 **For task ID input:**
 ```bash
-# Extract epic from task ID (remove .N suffix)
-EPIC=$(echo "<task-id>" | sed 's/\.[0-9]*$//')
+# Extract spec from task ID (remove .N suffix)
+SPEC=$(echo "<task-id>" | sed 's/\.[0-9]*$//')
 
-# Get all tasks in epic
-$FLOWCTL tasks --epic "$EPIC" --json
+# Get all tasks in spec
+$FLOWCTL tasks --spec "$SPEC" --json
 ```
 
 Filter to `status: todo` or `status: blocked`. Exclude the source task itself.
 
-**For epic ID input:**
+**For spec ID input:**
 ```bash
-$FLOWCTL tasks --epic "<epic-id>" --json
+$FLOWCTL tasks --spec "<spec-id>" --json
 ```
 
 1. First, find a **source task** to anchor drift detection (agent requires `COMPLETED_TASK_ID`):
@@ -125,9 +143,9 @@ Build context and spawn via Task tool:
 ```
 Sync task specs from <source> to downstream tasks.
 
-COMPLETED_TASK_ID: <source task id - the input task, or selected source for epic mode>
+COMPLETED_TASK_ID: <source task id - the input task, or selected source for spec mode>
 FLOWCTL: ${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/flowctl
-EPIC_ID: <epic id>
+SPEC_ID: <spec id>
 DOWNSTREAM_TASK_IDS: <comma-separated list from step 4>
 DRY_RUN: <true|false>
 
@@ -142,7 +160,7 @@ DRY RUN MODE: Report what would change but do NOT use Edit tool. Only analyze an
 
 Use Task tool with `subagent_type: flow-next:plan-sync` (sync-codex.sh rewrites `Task` to `spawn_agent` for the Codex mirror).
 
-**Note:** `COMPLETED_TASK_ID` is always provided - for task-mode it's the input task, for epic-mode it's the source task selected in Step 4.
+**Note:** `COMPLETED_TASK_ID` is always provided - for task-mode it's the input task, for spec-mode it's the source task selected in Step 4.
 
 ### Step 7: Report Results
 
@@ -171,10 +189,10 @@ No files modified.
 |------|---------|
 | No ID provided | "Usage: /flow-next:sync <id> [--dry-run]" |
 | No `.flow/` | "No .flow/ found. Run `flowctl init` first." |
-| Invalid format | "Invalid ID format. Use fn-N-slug (epic) or fn-N-slug.M (task). Legacy fn-N, fn-N-xxx also work." |
+| Unknown ID (does not resolve) | "Unknown ID. Use fn-N-slug (spec) / fn-N-slug.M (task), a tracker handle (wor-17), or legacy fn-N, fn-N-xxx." |
 | Task not found | "Task <id> not found. Run `flowctl list` to see available." |
-| Epic not found | "Epic <id> not found. Run `flowctl list` to see available." |
-| No source (epic mode) | "No completed or in-progress tasks to sync from. Complete a task first." |
+| Spec not found | "Spec <id> not found. Run `flowctl list` to see available." |
+| No source (spec mode) | "No completed or in-progress tasks to sync from. Complete a task first." |
 | No downstream | "No downstream tasks to sync (all done or none exist)." |
 
 ## Rules

@@ -13,13 +13,16 @@ Generate many candidate ideas grounded in the repo, critique every one with expl
 
 **Role**: idea-prospecting coordinator (sequential single-chat — generate → critique → rank → write → handoff). Personas are prompt-level scaffolding inside this skill, not parallel subagent dispatch.
 
-**CRITICAL: flowctl is BUNDLED — NOT installed globally.** `which flowctl` will fail (expected). Always use:
+## Preamble
+
+**CRITICAL: flowctl is BUNDLED — NOT installed globally.** `which flowctl` will fail (expected). Define once; subsequent blocks (here and in `workflow.md`) use `$FLOWCTL`:
 
 ```bash
 FLOWCTL="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/flowctl"
+[ -x "$FLOWCTL" ] || FLOWCTL=".flow/bin/flowctl"
 ```
 
-**Inline skill (no `context: fork`)** — keeps `AskUserQuestion` available throughout. Subagents can't call blocking question tools (Claude Code issues #12890, #34592), and Phases 0 + 6 both require user choice. (sync-codex.sh rewrites `AskUserQuestion` to `request_user_input` in the Codex mirror.)
+**Inline skill (no `context: fork`)** — keeps `AskUserQuestion` available throughout. Subagents can't call blocking question tools (Claude Code issues #12890, #34592), and Phases 0 + 6 both require user choice. (sync-codex.sh rewrites this to a plain-text numbered prompt in the Codex mirror.)
 
 ## Input
 
@@ -52,7 +55,7 @@ No env-var opt-in. Ralph never decides direction.
 Execute the phases in [workflow.md](workflow.md) in order:
 
 0. **Resume check** — list active artifacts <30d; ask extend / fresh / open via blocking question. Corrupt artifacts surfaced but never offered for extension.
-1. **Ground** — scan repo with graceful degradation: git log (30d), open epics, CHANGELOG top, memory matches, memory audit (if present), strategy snapshot (verbatim `name` / `target_problem` / `approach` / `tracks` / `last_updated` from `flowctl strategy read --json` when `sections_filled >= 1`; husk-vs-presence gate uses `sections_filled`, NOT `[[ -f STRATEGY.md ]]`). Emit a structured 30-50 line snapshot — titles + tags only, never raw bodies.
+1. **Ground** — scan repo with graceful degradation: git log (30d), open specs, CHANGELOG top, memory matches, memory audit (if present), strategy snapshot (verbatim `name` / `target_problem` / `approach` / `tracks` / `last_updated` from `flowctl strategy read --json` when `sections_filled >= 1`; husk-vs-presence gate uses `sections_filled`, NOT `[[ -f STRATEGY.md ]]`). Emit a structured 30-50 line snapshot — titles + tags only, never raw bodies.
 2. **Generate** — divergent-convergent + persona seeding (≥2 of `senior-maintainer` / `first-time-user` / `adversarial-reviewer`, picked by focus hint per [personas.md](personas.md)). One divergent prompt; no self-judging.
 3. **Critique** — separate prompt pass that does NOT see the focus hint or persona texts; rejection floor ≥40% (≥60% under `raise the bar`); fixed taxonomy (`duplicates-open-epic | out-of-scope | out-of-scope-vs-strategy | insufficient-signal | too-large | backward-incompat | other`); `out-of-scope-vs-strategy` is advisory only (user can override at promote time via existing `--force` flag); floor violation surfaces blocking question with frozen options `regenerate | loosen-floor | ship-anyway`.
 4. **Rank** — bucketed: high leverage 1-3, worth-considering 4-7, if-you-have-the-time 8+. Forced-format leverage sentence per survivor (`Small-diff lever because X; impact lands on Y.`); no numeric scores.
@@ -69,7 +72,6 @@ Same pattern as `/flow-next:plan` — non-blocking notice when `.flow/meta.json`
 if [[ -f .flow/meta.json ]]; then
   SETUP_VER=$(jq -r '.setup_version // empty' .flow/meta.json 2>/dev/null)
   PLUGIN_JSON="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.claude-plugin/plugin.json"
-  [[ -f "$PLUGIN_JSON" ]] || PLUGIN_JSON="${DROID_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/.factory-plugin/plugin.json"
   PLUGIN_VER=$(jq -r '.version' "$PLUGIN_JSON" 2>/dev/null || echo "unknown")
   if [[ -n "$SETUP_VER" && "$PLUGIN_VER" != "unknown" && "$SETUP_VER" != "$PLUGIN_VER" ]]; then
     echo "Plugin updated to v${PLUGIN_VER}. Run /flow-next:setup to refresh local scripts (current: v${SETUP_VER})." >&2
@@ -82,6 +84,6 @@ fi
 - Running under Ralph — hard-block via the guard above.
 - Setting `context: fork` — blocking question tools must stay reachable.
 - Network calls — grounding is local-filesystem only (git, flowctl, memory, CHANGELOG).
-- Writing to `.flow/epics/` directly — only `flowctl prospect promote` may do that.
+- Writing to `.flow/specs/` directly — only `flowctl prospect promote` may do that.
 - Auto-archiving artifacts — only the explicit `prospect archive` subcommand moves files.
 - Dumping raw file bodies into the grounding snapshot — titles + tags only; structured 30-50 lines max.

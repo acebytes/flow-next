@@ -1,0 +1,189 @@
+# Tracker sync bridge
+
+Project a flow-next spec to a tracker issue (Linear first, GitHub next) and reconcile body / status / comments two-way. Drives the `/flow-next:tracker-sync` skill plus the `flowctl sync …` plumbing.
+
+> **`/flow-next:tracker-sync` is NOT `/flow-next:sync`.** `/flow-next:sync` is **plan-sync** — it updates downstream *task* specs after implementation drift inside flow-next (`flow-next-sync` skill). `/flow-next:tracker-sync` is the **external tracker bridge** documented here. The two share a verb and nothing else.
+
+## Projection, not coordination
+
+The `.flow/specs/<id>.md` spec is the **single source of truth** and the quality layer. The tracker is a **co-editable mirror** for teams that must live in it. The bridge is **projection**, not **coordination**:
+
+- The tracker **mirrors** the spec. Body, status, and comments all sync **two-way** — a vague PM-authored issue can be pulled in, fleshed out in flow-next, and synced back.
+- The tracker **never drives flow state or spawns agents**. There is no board-status-flips-fire-an-agent control plane (that is OpenAI Symphony's model). Spec stays where work is authored, enriched, and executed.
+
+"Not coordination" means the tracker is not a control plane — it does **not** mean one-way. The decision record is `knowledge/decisions/tracker-sync-is-projection-not-2026-06-01` (survives `rm -rf .flow/` only if mirrored into `STRATEGY.md` / a decision entry that is committed). A Symphony-style board-triggered per-spec executor is a **separable future addition** — explicitly out of scope here.
+
+The contrast with Symphony: there, Linear is the canonical finite-state machine that spawns agents off a thin per-issue `WORKFLOW.md`. flow-next's pitch is "Symphony, but with real specs + re-anchoring + receipts" — the spec carries the weight, the tracker is a downstream window.
+
+## Setup — the discovery ceremony
+
+**Configuring the bridge is its own one-time step, separate from `/flow-next:setup`.** `/flow-next:setup` installs flowctl + project docs and **never touches tracker config** — that keeps the zero-dep base install clean for the (many) users who run no project-management software. The bridge is set up by running **`/flow-next:tracker-sync`**, whose **discovery ceremony** writes the config. (`/flow-next:setup` proposes running it as an optional next step when it finishes, so it's discoverable without being imposed.)
+
+The bridge is **off until explicitly enabled** (`tracker.enabled` defaults `false`, `tracker.type` defaults `null`). The discovery ceremony **detects → surfaces → asks → never assumes**, and writes config **only on confirmation**, with provenance. No signal ⇒ nothing written.
+
+Four probed signals:
+
+| Signal | Probe | Means |
+|---|---|---|
+| Linear MCP registered | host MCP/tool list contains a Linear server (e.g. `*Linear*` tools) | interactive Linear transport available (OAuth handled) |
+| `LINEAR_API_KEY` | `[ -n "$LINEAR_API_KEY" ]` | headless Linear GraphQL transport available |
+| GitHub auth | `gh auth status` exits 0 | headless GitHub transport available |
+| Jira host | a `*.atlassian.net` host configured/visible | Jira present — surfaced but out of scope (not offered) |
+
+Resolution is **env > config > ASK** (mirrors `flowctl review-backend`): if env/config already decides the transport, the ceremony doesn't re-ask. On confirmation the skill writes via `flowctl config set tracker.…` and verifies with `flowctl sync active --json` (must report `active: true`). The bridge is active iff raw `tracker.enabled == true` **OR** raw `tracker.type ∈ {linear, github}`.
+
+After the config writes, the ceremony asks **one optional, skippable readiness question** (1.12.0+): *which tracker workflow state means "ready for work"?* — a Linear workflow-state name (discovered from the team's states, with a "Ready"-looking name recommended) or a GitHub label (suggested `ready`, pre-created idempotently). The answer is stored as `tracker.readyState`; skipping writes nothing and leaves the readiness gate dormant. See [Readiness projection](#readiness-projection--trackerreadystate--local-ready-flag) below.
+
+## Two entry flows — no fixed starting point
+
+Both attach sync state **on link**:
+
+1. **Author-in-flow-then-push (flow-first).** A `fn-NN` spec already exists. Push creates the tracker issue, then `flowctl sync set-tracker-id` attaches the issue UUID + `--identifier WOR-17` + `--url`. The `fn-NN` id is kept; the tracker key becomes a resolvable alias.
+2. **Link-existing-issue (tracker-first): "grab issue X and spec it."** Fetch the issue, create the spec **keyed by the tracker key** (`flowctl spec create --tracker-first --tracker-identifier WOR-17`), seed the merge base from the current issue body, first pass is pull-only.
+
+## Hybrid id model (R16)
+
+The two id schemes **coexist**; resolution is provided by flowctl's widened resolver (case-insensitive). **Ids NEVER change — there is no rename-on-push.**
+
+| | Tracker-first (canonical) | Flow-first (alias) |
+|---|---|---|
+| canonical spec id | `wor-17-slug` | `fn-NN-slug` (unchanged) |
+| canonical task ids | `wor-17-slug.M` | `fn-NN-slug.M` |
+| branch | `wor-17-slug` | `fn-NN-slug` |
+| bare aliases | `wor-17` / `wor-17.M` resolve to the canonical slug id | `WOR-17` (stored in `tracker.identifier`) resolves to `fn-NN-slug` |
+| create / link | `flowctl spec create --tracker-first --tracker-identifier WOR-17` | `flowctl sync set-tracker-id fn-NN-slug <uuid> --identifier WOR-17 --url <url>` |
+
+- **Resolution is case-insensitive.** `flowctl show wor-17`, `work wor-17`, `plan wor-17`, tasks `wor-17.M` all resolve. `tracker.identifier` stores the **display form** (`WOR-17`); the canonical id derives from the lowercase key (`wor-17-slug`).
+- **The native `fn-` prefix is reserved** for the sequential scheme; tracker-key resolution is tried only after the `fn-` path misses. Enumeration sees tracker-key specs, but native `fn-N` allocation counts `fn-*` only — a `wor-9999` never bumps the next `fn`.
+- **One tracker team / workspace per repo.** The bridge assumes a single team key so a bare `wor-17` resolves unambiguously. Cross-workspace same-key collision (two teams both keyed `WOR`) is out of scope.
+- **No rename-on-push.** Existing spec/task ids, branches, and dep edges are never mutated on link; the tracker key is added as a resolvable handle, not a replacement. `flowctl spec set-title` on a tracker-linked spec updates the title only — it does **not** re-slug the id, branch, or files.
+
+The widened resolver / canonicalizer + the origin-branched id generator live in `flowctl.py` — see [`architecture.md`](architecture.md).
+
+## Grain — one spec ↔ one issue
+
+- **One flow spec maps to one tracker issue.** The tracker UUID is the durable dedupe key (`flowctl sync set-tracker-id`); `flowctl sync check-collisions` flags any UUID shared by two specs.
+- **Tasks stay flow-local by default** — never auto-created as tracker sub-issues. An optional checklist-in-body render (tasks as a body checklist, not sub-issues) is a body-format concern off by default.
+
+## Sync-state schema
+
+State lives in the existing `.flow/specs/<id>.json` sidecar (not frontmatter — merge-base body snapshots would bloat the markdown). Per-spec `tracker` block:
+
+| Field | Meaning |
+|---|---|
+| `id` | tracker UUID — the durable dedupe key |
+| `identifier` | display key, e.g. `WOR-17` |
+| `url` | issue URL |
+| `lastSyncedAt` | ISO timestamp of last real reconciliation (advances on a real reconcile, never on a no-op pull / echo) |
+| `baseHashFlow` / `baseHashTracker` | content hashes of each merge-base side (echo fence) |
+| `mergeBaseFlow` / `mergeBaseTracker` | the body snapshots themselves — the common ancestor for the agentic 3-way merge |
+
+The **merge base is a paired snapshot at one sync point**: `flowctl sync set-merge-base` requires **both** `--flow`/`--flow-file` AND `--tracker`/`--tracker-file` together (a partial write that pins one half to a stale sync point is rejected). The base is stored in a form comparable to each side so a 3-way merge can compare flow-structured spec against tracker free-form issue.
+
+## Transport ladder
+
+The skill is **transport-blind** — it calls a normalized interface (`fetchIssue` / `writeIssue` / `listComments` / `postComment` / `readStatus` / `setStatus`) and never sees a wire shape. Each adapter detects the **best available transport** and degrades gracefully:
+
+| Adapter | Ladder | Status fidelity |
+|---|---|---|
+| **Linear** | MCP → GraphQL (`LINEAR_API_KEY`) → no-op | full workflow states |
+| **GitHub** | `gh` (single rung) → no-op | reduced fidelity (open/closed) |
+
+When **no transport is reachable**, the run is a **`noop` + receipt note** — never a crash. The transport actually used (`mcp` / `graphql` / `gh` / `none`) is recorded on every receipt.
+
+## Lifecycle sync points (on by default — opt-out)
+
+Sync is wired into seven lifecycle skills. **When you hook the bridge up via the `/flow-next:tracker-sync` discovery ceremony, the whole pipeline activates by default** — the point of connecting a tracker is to keep it in sync, so you don't opt in event-by-event. You **opt out** instead: exclude events at ceremony time, or turn any off later with `flowctl config set tracker.perEvent.<event> off`. Leaf values: `off | pull | push | reconcile | comment`.
+
+| Event | Config key | Default op | Fires when |
+|---|---|---|---|
+| capture | `tracker.perEvent.capture` | `reconcile` | a spec is captured |
+| interview | `tracker.perEvent.interview` | `reconcile` | a spec is refined |
+| plan | `tracker.perEvent.plan` | `reconcile` | a spec is decomposed into tasks |
+| work (first claim) | `tracker.perEvent.work.firstClaim` | `push` | the first task of a spec is claimed |
+| work (done) | `tracker.perEvent.work.done` | `comment` | a task completes |
+| make-pr | `tracker.perEvent.makePr` | `comment` | a PR is opened (→ issue **In Review** + PR link, unconditional when bridge active — fn-66) |
+| resolve-pr | `tracker.perEvent.resolvePr` | `comment` | PR threads are resolved |
+| completion review | `tracker.perEvent.completionReview` | `comment` | a spec-completion review runs (verdict + R-ID coverage; **never terminal Done** — fn-66) |
+| land (merged) | `tracker.perEvent.land.merged` | `push` | a PR **merges** (→ issue **Done**, the SOLE Done driver, gated on the GitHub `MERGED` probe; **active-by-default** when bridge active — fn-66) |
+
+The lifecycle skills value-check `flowctl sync active` and the specific `perEvent` leaf, short-circuiting cleanly when the bridge is off or an event was opted out — so a no-tracker repo (or an excluded event) costs a single value-check, no transport.
+
+**Observable + forcing (fn-57).** Every lifecycle dispatch is **event-tagged**: the tracker-sync skill writes its receipt with `--event <perEvent-key>` (`work.firstClaim`, `work.done`, `capture`, `makePr`, …), so `.flow/sync-runs/` records which touchpoint each run served. At end-of-skill, **work, capture, and make-pr** run the read-only audit `flowctl sync check <spec-id> --events <triggered-csv> --since <run-anchor>` — independently of the touchpoints themselves, so a wholesale-skipped dispatch block is still caught. An event is `MISSING` iff it triggered this run AND its `perEvent` leaf is enabled AND the bridge is active AND no receipt with a matching `event` tag and `timestamp ≥ --since` exists (any receipt status clears — the check asserts the touchpoint *ran*; the receipt's own status carries success/failure detail). A `MISSING` event is **retro-fired exactly once** — the skill re-dispatches the missed touchpoint via tracker-sync, then re-checks against a fresh `--since` — and the skill's final summary carries a mandatory four-state `Tracker sync:` slot: `OK` | `MISSING:<event> → retro-fired → OK` | `MISSING:<event> (retro-fire failed: <reason>)` | `n/a (bridge inactive)`. An explicit `n/a` proves the check ran; an absent slot is visible as a skipped check. With no tracker configured `sync check` exits silently in constant time — non-tracker repos see no change anywhere.
+
+**Auto-link on first touch (create-if-unlinked).** When a lifecycle event fires for a spec that isn't yet linked — e.g. you went straight to `/flow-next:plan` instead of `/flow-next:capture` — the tracker-sync skill **flow-first-pushes (creates the issue + links it) *before* running the event's operation**, then later events reconcile the now-linked spec (skill `steps.md` §Phase 3 "create-if-unlinked"). That is the point of the opt-out model: an active bridge keeps **every** in-flow-authored spec in sync, not just the ones you remembered to link by hand. The spec ↔ one-issue grain is unchanged — tasks never become sub-issues. Only `unlink` no-ops on an unlinked spec; every other op creates-then-syncs (and still no-ops cleanly if no transport is reachable).
+
+**Activation is ceremony-gated, not flag-gated.** The config *schema* default for every `perEvent` leaf stays `off`, so a bare `tracker.enabled=true` set by hand or a script — without running the discovery ceremony — fires **no lifecycle-event sync** (every `perEvent` event stays dormant). Only the ceremony's explicit per-event writes (or your own `config set`) turn events on. This keeps the accidental-enable guard while making the *intended* path (run the ceremony) sync everything. **The two things that are *not* gated this way are make-pr's PR↔issue link (+ In Review) and `land.merged`'s Done-on-merge** — both unconditional whenever the bridge is active (the exceptions documented just below), so a bare `enabled=true` plus a linked spec will still add a `Ref` line + move the issue to In Review on the next make-pr, and move it to Done on a confirmed merge. The make-pr linkage is cheap, conflict-free, and the whole point (Linear Diffs); the land.merged Done is merge-evidence-gated so it only fires for genuinely shipped work. Neither mutates the spec beyond the linked issue's status.
+
+**Two unconditional paths when the bridge is active (fn-66).** Some status transitions are too important to leave opt-in:
+
+1. **make-pr — PR link + In Review.** make-pr always links the new PR to its tracker issue *and* moves the issue to **In Review** when `sync active` and the issue is linked — it does **not** require opting `makePr` in. An open PR *is* the In Review lifecycle rung (`flowToNormalized(spec, open) → in-review`, non-terminal), and the link powers Linear Diffs — both ride the same unconditional path. The `perEvent.makePr` leaf still governs any *extra* make-pr sync (e.g. an optional breadcrumb comment). make-pr additionally **verifies the ref landed** post-create (§4.6b): it fetches the LIVE PR body via `gh pr view --json body` and, when the `Ref <identifier>` line is absent (e.g. an agent hand-rolled `gh pr create` and bypassed the deterministic append), repairs it append-only via `gh pr edit` — mechanical, idempotent, fully non-fatal.
+2. **land — Done on merge.** `land.merged` is **active-by-default** when the bridge is active and is the **SOLE** driver of the terminal `Done` state. A real merge is the only event that legitimately projects "shipped", so leaving it opt-in would strand boards at In Review forever after a merge. The terminal write self-checks the GitHub `MERGED` probe (the merge-evidence invariant) — no path writes `Done` without it. The `perEvent.land.merged` leaf, if set, only tunes the optional verdict comment, never the (MERGED-gated) status.
+
+These are the only two unconditional touchpoints; everything else stays `perEvent`-gated.
+
+### MISSING after retro-fire — recovery
+
+A `Tracker sync: MISSING:<event> (retro-fire failed: <reason>)` summary line means the touchpoint didn't fire AND the one bounded retro-fire couldn't recover it — typically no reachable transport (MCP server down, no `LINEAR_API_KEY`, `gh` unauthenticated). The primary work is unaffected: tracker sync is best-effort and never blocks, so the task is done / the PR is open. To recover by hand:
+
+1. **Read the failure reason** from the run's receipts: `ls -t .flow/sync-runs/sync-<spec-id>-*.json | head -3` — the `status` (`noop` / `errored`) and `note` fields on the event-tagged receipt say why it failed.
+2. **Once transport returns**, re-fire the missed touchpoint manually via the skill: `/flow-next:tracker-sync push <spec-id>` for the status event (`work.firstClaim`), or the matching `comment <spec-id>` op for comment events (`work.done`, `makePr`, and `work.completionReview` — the last posts only a verdict + R-ID coverage comment, never a terminal status per fn-66).
+3. **Verify**: `flowctl sync check <spec-id> --events <event> --since <retro-fire-time>` now prints `OK:<event>`.
+
+## Linear Diffs — review the PR inside the issue
+
+[Linear Diffs](https://linear.app/docs/diffs) (GA May 2026) renders a GitHub PR's diff, file changes, checks, and inline review threads directly on the Linear issue, and lets you approve / request changes / merge from Linear. flow-next makes your PRs **Diffs-ready automatically** when `tracker.type == linear`:
+
+- **What flow-next does:** make-pr puts a **non-closing** `Ref WOR-N` line in the PR body (make-pr §4.6a) so Linear's GitHub integration auto-links the PR to the issue — which is exactly what makes the diff render. On the GraphQL transport it also creates the rich PR attachment (`attachmentLinkURL`) for status sync. *Non-closing* (`Ref`, not `Fixes`) is deliberate: the PR links + renders as a diff but does **not** auto-complete the Linear issue on merge — flow-next's `land.merged` touchpoint owns the `Done` transition (fn-66), gated on a GitHub-confirmed `MERGED` probe. (Pre-fn-66 this said "spec-completion-review owns the Done transition" — that was the bug FLOW-15 caught: completion review is *local* completion, not merge evidence, so it could close the issue before the PR merged. Completion review now posts only a verdict comment + at most `In Review`; `Done` is reserved for a merged PR.)
+- **What you must enable (one-time, Linear-side — flow-next can't set these):** the Linear **GitHub integration with code access** to the repo, your **personal GitHub connection**, and **"Enable code reviews"** in Linear settings. Without them the PR still links and status still syncs; only the rendered diff view needs them.
+- **GitHub tracker:** no Linear Diffs — the PR is cross-linked natively (`Refs #N`) in the same repo; review happens on GitHub.
+
+## Reconciliation — who-wins
+
+- **Body** — agentic host-agent semantic **3-way merge** against the `lastSyncedAt` merge-base snapshot, translating between flow's structured spec and the tracker's free-form issue. Only **genuine contradictions** surface; confident merges proceed.
+- **Status** — per-field **who-wins** ladder. The collision/deadlock case is evaluated **before** single-field terminal-wins rules (a `tracker=done × flow=…` deadlock must fall to `conflictTiebreak`, not be silently overwritten by terminal-wins). Tiebreak is `tracker.conflictTiebreak` (`flow-wins | tracker-wins | always-ask`, default `always-ask`).
+- **Comments / evidence** — two-way **append** with dedup; neither side overwrites the other.
+
+## Readiness projection — `tracker.readyState` → local `ready` flag
+
+When `tracker.readyState` is configured (the optional ceremony question above), every operation that reads the issue (`pull` / `reconcile`) projects the configured tracker state onto the local spec [`ready` flag](flowctl.md#spec-ready--spec-unready) — giving readiness a **single local read path** whether it's human-set or tracker-driven (1.12.0+, fn-58).
+
+- **One-way pull, tracker authoritative.** Readiness is projected tracker → local only — the local `ready` flag is never pushed to the tracker (no `setStatus`, no label add/remove). A local `flowctl spec ready` on a tracker-connected repo is overwritten by the next sync; tracker users set readiness on the board (which is why capture/interview's mark-ready prompt is gated off when `readyState` is configured).
+- **Match semantics.** Linear: case-insensitive trimmed match on the workflow-state **name** (names, not `state.type` — a custom "Ready" state is typically `type=unstarted`, so type alone can't distinguish Todo from Ready). GitHub: the `readyState` **label** — present on the issue ⇒ `ready=true`, absent ⇒ `ready=false` (absence is a normal state; un-labeling IS how a GitHub user un-readies a spec).
+- **Change-only receipts.** The projection applies via the idempotent `spec ready`/`unready` toggles and emits an event-tagged receipt **only when the local flag actually changes** — silent on a no-op echo (mirrors the `lastSyncedAt` advance-only-on-real-reconciliation rule).
+- **Stale-config degradation.** A configured state name / label that no longer resolves on the tracker (renamed/deleted) ⇒ **warn + `noop` receipt + flag untouched + the sync continues** — one bad knob never aborts the run, and a stale `readyState` must not silently un-ready every linked spec.
+- **Orthogonal to status.** The projection never feeds the who-wins ladder above, never advances `lastSyncedAt` by itself, and never blocks — body/status/comments reconcile exactly as before. `readyState: null` (the default) skips it entirely: no calls, no receipts, no flag writes.
+- **Opting back out.** `flowctl config set tracker.readyState null` clears the knob (the literal `null` token is stored as JSON null) — the projection goes dormant and local `spec ready`/`unready` is authoritative again.
+- **Pilot interplay (1.13.0+).** [`/flow-next:pilot`](../skills/flow-next-pilot/SKILL.md) selects ready specs and, after two healthy no-advance ticks, runs a local `spec unready` (don't-thrash). On a `readyState`-configured repo that local write is **advisory until the board reflects it** — the next pull projects the issue's state back, re-readying the spec, and pilot treats a ready-again spec as human re-blessed (strikes cleared). So when pilot strikes a spec out, **move the issue out of the ready state on the board** before the next sync; re-blessing after a fix is the reverse move. The board stays the single control plane for readiness either way.
+
+## Dependency projection — `depends_on_epics` → tracker issue relations
+
+Flow specs declare cross-spec dependencies locally via `depends_on_epics` (the edges shown by `flowctl show` / `flowctl dep`). Left alone, that graph stays **local-only** — the board shows independent issues even though Flow knows one blocks another. Dependency projection (2.1.0+, fn-64) closes that gap: on push/reconcile of a linked spec, each `depends_on_epics` edge between two **linked** specs becomes a **blocked-by** relation between their issues — on both Linear and GitHub, idempotently, never clobbering a relation a human added by hand. It is the relations counterpart to body/status/comments sync — projection, not coordination; flow stays authoritative and the tracker is never a control plane for deps.
+
+The projection runs through the transport-blind `projectDepRelations` hook (modelled on the one-way `projectReadiness` pull): the skill resolves the edges via `flowctl sync list-dep-relations`, then calls the normalized adapter relation transport (`setIssueRelation` / `listIssueRelations`, see [`references/adapter-interface.md`](../skills/flow-next-tracker-sync/references/adapter-interface.md)). The skill code does **not** branch on Linear-vs-GitHub — only the adapter fidelity differs.
+
+- **Direction — blocked-by.** Flow's `depends_on_epics` means "this spec is blocked by those," a direct match to the blocked-by/blocks relation pair. The current (dependent) issue is recorded as **blocked by** each dependency issue — no inversion ambiguity. On Linear that is a `blocks` edge with the operands swapped; on GitHub a `blocked_by` dependency.
+- **Per-adapter fidelity.** **Linear:** native issue relations — MCP `save_issue` `blockedBy`/`blocks` if the pinned schema exposes them, else the GraphQL `issueRelationCreate` rung, else a `noop` receipt on the bottom rung. **GitHub:** native issue **dependencies** (GA Aug 2025) via the REST `…/issues/{n}/dependencies/blocked_by` endpoints where the repo/account has them (feature-detected with a `GET` probe), else a provenance-fenced **"Blocked by" body block** (`<!-- flow:deps -->`…`<!-- /flow:deps -->` list of `#N` references) — the same reduced-fidelity posture the adapter already takes for status.
+- **Idempotent — read-before-write.** Neither platform reliably no-ops a duplicate, so every projection reads the existing relations first (Linear: across **both** `relations` AND `inverseRelations`, each canonicalized to one direction; GitHub native: the `blocked_by` listing; GitHub fenced: the existing `#N` lines). A rerun creates zero new relations and appends nothing to the fenced block.
+- **Provenance — flow-side ledger.** Neither tracker stores relation authorship, so tracker-sync records the edges it created in a per-spec `depRelations` ledger (the `.flow/specs/<id>.json` sidecar, atomic write — mirroring the merge-base hash-provenance shape). Each entry is `{key, dep_spec, from_tracker_id, to_tracker_id, type: "blocks", source: "flow", updatedAt}`, where `key` is an opaque hash of the directed pair (never a raw issue key inline — trackers auto-linkify keys even inside HTML comments). A relation **not** in the ledger (native) / **outside** the fenced block (GitHub fallback) is **never removed** — a human's manual relation is safe, by construction. Removal of *our* now-stale edges is the provenance-safe `clear-dep-relation` path; removing ours-but-stale is best-effort, never a delete of someone else's.
+- **GitHub fenced block ↔ body-merge.** The `<!-- flow:deps -->` block is **flow-owned**: the body-merge layer strips it before every hash / merge-base / divergence comparison (the canonical `trackerBodyForMerge` transform, [`references/body-merge.md`](../skills/flow-next-tracker-sync/references/body-merge.md)), so flow's own dependency block never round-trips back into the spec or registers as phantom tracker divergence.
+- **Completed-blocker rule.** A dependency whose **local** dep spec is `done` (→ its issue Done/Closed) is a historical/completed blocker: the relation stays **visible** on the tracker (the board keeps the real historical ordering) but does **not** feed back into Flow `ready=true` gating — readiness already treats done deps as satisfied, and this hook must not regress that. `dep_status` in `list-dep-relations` is the *local* dep-spec status, never a remote fetch — flow is authoritative and the rule keys off the local dep being `done`.
+- **Warnings, never silent drops.** A dependency spec with **no tracker link** is surfaced as a warning naming the dep spec id (and parent), in the skill report and on the `sync receipt`; the rest of the sync proceeds (item-level failure isolation). Self-edges are skipped with a warning. A dependency **cycle** in the flow graph is tolerated — each declared edge is projected as an independent direct relation, with **no** graph traversal or transitive expansion.
+- **Collision — human-removed relations are not recreated.** An edge present in the `depRelations` ledger AND still in `depends_on_epics`, but **missing remotely** (a tracker user removed the projected relation), is evaluated **before** per-side rules: it emits `sync defer` + a `queued` receipt rather than silently recreating the relation. Re-creating a human-removed relation is the explicit anti-behavior — same conservative posture as the body/status who-wins ladder.
+
+## Ralph-safe — never blocks
+
+Every run emits a receipt (`flowctl sync receipt --status …`); genuine conflicts **queue** (`flowctl sync defer …`) rather than block. In autonomous / Ralph mode an `always-ask` tiebreak resolves to **queue**, not prompt — same policy, surface-dependent delivery. Deferred conflicts land in the **review deferred-findings sink** (`.flow/review-deferred/<branch>.md`) where the human already looks for deferred work — so tracker-sync never needs `flowctl block`, never stalls the loop. See [`ralph.md`](ralph.md).
+
+## flowctl surface
+
+The skill owns judgment (API calls, reconciliation, asking); `flowctl sync` owns deterministic plumbing. Full flag reference in [`flowctl.md`](flowctl.md#sync) — `sync active` / `get-state` / `set-tracker-id` / `set-last-synced` / `set-merge-base` / `clear` / `list-unsynced` / `list-stale` / `check-collisions` / `list-dep-relations` / `set-dep-relation` / `clear-dep-relation` (the dependency-projection ledger) / `receipt` (event-tagged via `--event <perEvent-key>`) / `check` (read-only lifecycle audit, `OK`/`MISSING` per event) / `defer`, plus the `tracker.*` config keys.
+
+> Sync-engine shape (discovery ceremony, per-item `lastSyncedAt`, surface-diffs-never-overwrite) adapted from Ray Fernando's `running-bug-review-board` `issue-trackers.md` (Apache-2.0) — see CHANGELOG.
+
+## See also
+
+- [`flowctl.md`](flowctl.md#sync) — `flowctl sync` subcommands + `tracker.*` config keys.
+- [`teams.md`](teams.md) — projection-not-coordination positioning, Symphony contrast, adoption ladder.
+- [`architecture.md`](architecture.md) — spec-JSON `tracker` fields, widened id resolver.
+- [`ralph.md`](ralph.md) — conflicts queue to deferred-decisions, never block.

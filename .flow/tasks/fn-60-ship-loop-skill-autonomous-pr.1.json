@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-06-11T13:34:43.768903Z",
+  "depends_on": [
+    "fn-60-ship-loop-skill-autonomous-pr.2"
+  ],
+  "id": "fn-60-ship-loop-skill-autonomous-pr.1",
+  "priority": null,
+  "spec": "fn-60-ship-loop-skill-autonomous-pr",
+  "spec_path": ".flow/tasks/fn-60-ship-loop-skill-autonomous-pr.1.md",
+  "status": "todo",
+  "title": "flow-next-land skill: cadence tick (discover, gate, CI-fix, converge, merge, close, release)",
+  "updated_at": "2026-06-11T13:40:42.320869Z"
+}

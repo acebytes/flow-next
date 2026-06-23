@@ -3,10 +3,14 @@
 #
 # One-liner install (no manual clone needed):
 #   git clone --depth 1 https://github.com/gmickel/flow-next.git /tmp/flow-next-install \
-#     && /tmp/flow-next-install/scripts/install-codex.sh flow-next \
+#     && /tmp/flow-next-install/scripts/install-codex.sh \
 #     && trash /tmp/flow-next-install
 #
-# Usage: ./scripts/install-codex.sh <flow|flow-next>
+# Usage: ./scripts/install-codex.sh [flow-next]
+#
+# (The plugin name is optional and defaults to flow-next — kept for backward
+# compatibility with older one-liners. The legacy `flow` plugin was removed
+# in flow-next 1.0.2.)
 #
 # What gets installed (from pre-built codex/ directory):
 #   - Skills:    codex/skills/             → ~/.codex/skills/
@@ -16,6 +20,7 @@
 #   - CLI tools: flowctl, flowctl.py       → ~/.codex/scripts/
 #   - Scripts:   worktree.sh              → ~/.codex/scripts/  (from codex/skills/)
 #   - Templates: ralph-init templates      → ~/.codex/templates/
+#   - References: codex/references/*.md    → ~/.codex/references/
 #   - Manifest:  .codex-plugin/plugin.json → ~/.codex/plugin.json
 #   - Config:    agent entries             → ~/.codex/config.toml (merged)
 #
@@ -37,23 +42,13 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Parse argument
-PLUGIN="${1:-}"
-if [ -z "$PLUGIN" ]; then
-    echo -e "${RED}Error: Plugin name required${NC}"
-    echo "Usage: $0 <flow|flow-next>"
-    exit 1
-fi
-
-if [ "$PLUGIN" = "flow" ]; then
-    echo -e "${RED}Error: 'flow' plugin does not have pre-built Codex files.${NC}"
-    echo "Use 'flow-next' instead."
-    exit 1
-fi
-
+# Plugin is fixed to flow-next; the optional positional arg is accepted for
+# backward compatibility with old one-liners that passed `flow-next` explicitly.
+PLUGIN="${1:-flow-next}"
 if [ "$PLUGIN" != "flow-next" ]; then
-    echo -e "${RED}Error: Invalid plugin '$PLUGIN'${NC}"
-    echo "Usage: $0 <flow|flow-next>"
+    echo -e "${RED}Error: only 'flow-next' is supported${NC}"
+    echo "The legacy 'flow' plugin was removed in flow-next 1.0.2."
+    echo "Usage: $0 [flow-next]"
     exit 1
 fi
 
@@ -77,7 +72,7 @@ echo
 
 # Create target directories
 mkdir -p "$CODEX_DIR/skills" "$CODEX_DIR/agents" "$CODEX_DIR/scripts" \
-         "$CODEX_DIR/prompts" "$CODEX_DIR/templates"
+         "$CODEX_DIR/prompts" "$CODEX_DIR/templates" "$CODEX_DIR/references"
 
 # ====================
 # Skills (pre-patched)
@@ -142,6 +137,38 @@ if [ -d "$CODEX_SRC/skills/flow-next-ralph-init/templates" ]; then
     chmod +x "$CODEX_DIR/templates/flow-next-ralph-init/"*.sh 2>/dev/null || true
     chmod +x "$CODEX_DIR/templates/flow-next-ralph-init/"*.py 2>/dev/null || true
     echo -e "${GREEN}✓${NC} ralph-init templates"
+fi
+
+# ====================
+# Top-level templates (canonical spec template + future siblings)
+# ====================
+# Skills resolve `${CLAUDE_PLUGIN_ROOT}/templates/spec.md` at runtime
+# (interview NEW IDEA path, CLAUDE.md cross-link). Without this copy,
+# Codex installs miss the canonical template and the symmetric-interview
+# new-spec path breaks. Mirrored by sync-codex.sh into $CODEX_SRC/templates/.
+if [ -d "$CODEX_SRC/templates" ]; then
+    for tpl in "$CODEX_SRC/templates/"*.md; do
+        [ -f "$tpl" ] || continue
+        cp "$tpl" "$CODEX_DIR/templates/"
+    done
+    TPL_COUNT=$(find "$CODEX_SRC/templates" -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')
+    [ "$TPL_COUNT" -gt 0 ] && echo -e "${GREEN}✓${NC} $TPL_COUNT top-level template(s) (spec.md + siblings)"
+fi
+
+# ====================
+# References (shared disclosure files — fn-62.2)
+# ====================
+# Skills resolve `${CLAUDE_PLUGIN_ROOT}/references/<name>.md` at runtime
+# (e.g. references/html-artifacts.md, loaded only when the matching config
+# gate is on). Mirrored by sync-codex.sh into $CODEX_SRC/references/ —
+# byte-identical to canonical (reference files are tool-name-agnostic).
+if [ -d "$CODEX_SRC/references" ]; then
+    for ref in "$CODEX_SRC/references/"*.md; do
+        [ -f "$ref" ] || continue
+        cp "$ref" "$CODEX_DIR/references/"
+    done
+    REF_COUNT=$(find "$CODEX_SRC/references" -maxdepth 1 -name '*.md' | wc -l | tr -d ' ')
+    [ "$REF_COUNT" -gt 0 ] && echo -e "${GREEN}✓${NC} $REF_COUNT shared reference file(s)"
 fi
 
 # ====================
