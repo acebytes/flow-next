@@ -108,7 +108,7 @@ droid plugin marketplace add \
 /flow-next:resolve-pr <PR#>          # 5. Fetch review threads → triage → resolve
 ```
 
-That's the inner loop. Branch in (`/flow-next:prospect` for ranked candidates, `/flow-next:interview` for structured discovery), branch out (`/flow-next:pilot` + `/flow-next:land` for the autonomous assembly line, `/flow-next:ralph-init` for hardened overnight runs, `/flow-next:audit` for memory garbage collection).
+That's the inner loop. Branch in (`/flow-next:prospect` for ranked candidates, `/flow-next:interview` for structured discovery), branch out (`/flow-next:pilot` + `/flow-next:land` for the autonomous assembly line, `/flow-next:fleet` for human-gated parallel batches across many specs at once, `/flow-next:ralph-init` for hardened overnight runs, `/flow-next:audit` for memory garbage collection).
 
 <div align="center">
 
@@ -224,6 +224,16 @@ flowctl spec ready fn-12          # bless work (or move its issue on the tracker
 ```
 
 Run both concurrently — two instances, **separate clones** — and you have the full assembly line: board → pilot → draft PR → land → released. The `ready` flag (or your tracker's board state) is the consent boundary: humans bless specs, loops drain them. 📖 **[Going autonomous](https://flow-next.dev/autonomous/overview)**
+
+**Fleet** is the human-gated parallel alternative when you want to see and approve a whole batch at once. `/flow-next:fleet` inspects every ready spec, classifies each by the pilot stage table (work / plan-review / spec-completion-review / make-pr), groups conflicting units into safe waves by file-overlap, asks you to approve, then launches one short-lived worktree per unit with a fleet-runner subagent that chains the stage skill into `/flow-next:make-pr` and `/flow-next:resolve-pr`. STUB specs route to a notification queue instead of auto-planning. Reach for it when you've got 5–10 ready specs to land in parallel and want explicit approval before the fan-out.
+
+```bash
+/flow-next:fleet                 # inspect → classify → approve → fan out parallel worktrees
+/flow-next:fleet --dry-run       # classification + plan only, no worktrees
+/flow-next:fleet --work-only     # only dispatch /work units (skip plan-review / completion-review)
+```
+
+Fleet does NOT merge — like every other skill except `/flow-next:land`, the per-worktree chain stops at `resolve-pr` and the user clicks merge when CI is green.
 
 **Ralph** is the hardened harness for **fully planned** specs (it never plans): an external shell loop drives a *fresh* session per iteration — failed attempts die with the session instead of polluting the next one — with hook-enforced guardrails and receipts on disk. Reach for it when a run outlasts a session or prose guardrails aren't enough.
 

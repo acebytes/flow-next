@@ -97,6 +97,7 @@ flow-next is a first-class citizen on Claude Code, Codex, and Factory Droid. **A
 | Full doc index (subsystem + workflow references) | [`plugins/flow-next/docs/README.md`](plugins/flow-next/docs/README.md) |
 | Spec-driven team workflow + handover objects | [`plugins/flow-next/docs/teams.md`](plugins/flow-next/docs/teams.md) |
 | Build-loop conductor (`/flow-next:pilot` — single-tick spec-to-PR pipeline driven by host `/loop` / `/goal`; verdict grammar, strikes, autonomous-mode signal) | [`plugins/flow-next/skills/flow-next-pilot/SKILL.md`](plugins/flow-next/skills/flow-next-pilot/SKILL.md) |
+| Parallel-worktree orchestrator (`/flow-next:fleet` — human-gated parallel counterpart to pilot; inspect/classify/wave-group/approve/fan-out across many ready specs; per-worktree chain `/work` → `/make-pr` → `/resolve-pr`; never merges) | [`plugins/flow-next/skills/flow-next-fleet/SKILL.md`](plugins/flow-next/skills/flow-next-fleet/SKILL.md) |
 | Ralph autonomous mode internals | [`plugins/flow-next/docs/ralph.md`](plugins/flow-next/docs/ralph.md) |
 | Full `flowctl` CLI reference | [`plugins/flow-next/docs/flowctl.md`](plugins/flow-next/docs/flowctl.md) |
 | `.flow/` directory layout + spec-first task model | [`plugins/flow-next/docs/architecture.md`](plugins/flow-next/docs/architecture.md) |

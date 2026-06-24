@@ -1,0 +1,6 @@
+interface:
+  display_name: "Flow Fleet"
+  short_description: "Parallel-worktree orchestrator over ready specs — inspects, classifies, gets human approval, fans out worktrees chaining /work → /make-pr → /resolve-pr"
+  brand_color: "#3B82F6"
+policy:
+  allow_implicit_invocation: false
